@@ -47,7 +47,7 @@ WDA_EXCLUDEFROMCAPTURE = 0x00000011
 
 # 路径计算：获取当前脚本所在目录及项目根目录
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)  # 上一级目录
+PROJECT_ROOT = SCRIPT_DIR  # 仓库根目录（脚本当前所在目录）
 
 
 class Config:
