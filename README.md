@@ -4,3 +4,4 @@
 - 你只需要下载该文件，然后在python3.12中下载好所有依赖，即可可视化运行
 
 - .exe文件在931256891 QQ群
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/yrefia/FaintOCR)
