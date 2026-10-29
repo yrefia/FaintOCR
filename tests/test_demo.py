@@ -79,8 +79,12 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(core.parse_annotation(source, raw)['items'], expected)
         annotation = (PROMPT_ROOT / 'annotation.txt').read_text(encoding='utf-8-sig')
         explanation = (PROMPT_ROOT / 'explanation.txt').read_text(encoding='utf-8-sig')
-        self.assertEqual(core.build_payload(source, annotation, 'deepseek-chat'),
-                         ref['build_payload'](source, annotation, 'deepseek-chat'))
+        # 唯一有意的差异：标注输出预算从 5.4.3 的 8192 放宽，避免长文被截断。
+        payload = core.build_payload(source, annotation, 'deepseek-chat')
+        self.assertEqual(payload.pop('max_tokens'), core.ANNOTATION_MAX_TOKENS)
+        reference = ref['build_payload'](source, annotation, 'deepseek-chat')
+        self.assertEqual(reference.pop('max_tokens'), 8192)
+        self.assertEqual(payload, reference)
         for item in expected:
             self.assertEqual(core.build_explanation_payload(source, item, explanation, 'deepseek-chat'),
                              ref['build_explanation_payload'](source, item, explanation, 'deepseek-chat'))
@@ -146,6 +150,16 @@ class DemoTests(unittest.TestCase):
         self.wait_until(lambda: not w.busy)
         self.assertNotIn('test-key', w.status.text())
         self.assertIn('failure', w.status.text())
+
+    def test_truncated_annotation_asks_for_shorter_text(self):
+        w = self.window
+        body = {'choices': [{'message': {'content': json.dumps(self.module['DEMO'])}, 'finish_reason': 'length'}]}
+        w.core.transport = lambda key, payload: json.dumps(body)
+        w.key.setText('test-key')
+        w.english.setPlainText(self.module['SAMPLE'])
+        w.submit()
+        self.wait_until(lambda: not w.busy)
+        self.assertIn('token 上限', w.status.text())
 
     def test_ui_key_overrides_config_for_both_requests(self):
         w = self.window

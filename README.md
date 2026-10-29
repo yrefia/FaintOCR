@@ -378,6 +378,8 @@ $env:FAINTOCR_REFERENCE_PATH = "D:\IA\OCR\FaintOCR\Codeia\5.x\Demo 5.4.3.py"
 # - 本文件只保留调试 UI、提示词编辑、窗口容器、拖动与解释面板。
 # - 原 5.4.3、4.2.2 与所有提示词正文保留，示例、协议、配色不变。
 # - UI 通过 core.poll() 接收后台结果；共享核心不依赖 PySide6。
+# - 有意偏离 5.4.3：标注输出预算 8192 → 16384 tokens、请求超时 60 → 180 秒。6000 字符原文实测输出
+#   约 5.6k–8.2k tokens，8192 时会被截断（finish_reason=length）；截断时状态栏提示缩短原文。
 ```
 
 ### FaintOCR 4.2.2

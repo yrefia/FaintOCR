@@ -543,7 +543,9 @@ class AnnotationWindow(QWidget):
                     result=self.core.apply_json(result['source'],self.raw.toPlainText())
                 self.show_document(result,f"返回解析 · {event['elapsed']:.1f} 秒")
                 reason=event['finish_reason']
-                if reason not in (None,'stop'):
+                if reason=='length':
+                    self.status.setText(self.status.text()+' · 提醒：输出达到 token 上限，后面的句子可能缺少标注；请缩短原文后重试。')
+                elif reason not in (None,'stop'):
                     self.status.setText(self.status.text()+f' · 提醒：响应未正常结束（{reason}），请检查完整性。')
             else:
                 self.status.setText('请求提醒：'+event['data']+'；已显示本次原文。')

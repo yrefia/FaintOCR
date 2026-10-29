@@ -85,6 +85,10 @@ CATEGORIES = {
     "word": ("单词 · 粗体", "#30343b", ""),
 }
 MAX_EXPLANATION_CHARS = 320
+# 5.4.3 用 8192 / 60 秒：6000 字符原文实测输出约 5.6k–8.2k tokens，会被截断（finish_reason=length）；
+# deepseek-v4-pro 约 160 tokens/秒，16384 tokens 需约 100 秒，因此一并放宽超时。
+ANNOTATION_MAX_TOKENS = 16384
+REQUEST_TIMEOUT = 180
 PHRASE_UNDERLINE_COLOR = "#7BDCE8"
 
 def build_payload(english, prompt, model):
@@ -105,7 +109,7 @@ def compose_annotation_payload(english, prompt, model):
         {"role": "system", "content": prompt},
         {"role": "user", "content": json.dumps({"english": english}, ensure_ascii=False)},
     ], "thinking": {"type": "disabled"}, "stream": False,
-        "response_format": {"type": "json_object"}, "max_tokens": 8192}
+        "response_format": {"type": "json_object"}, "max_tokens": ANNOTATION_MAX_TOKENS}
 
 
 TAG_CATEGORIES = {
@@ -435,7 +439,7 @@ def request_annotations(key, payload):
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"}, method="POST")
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
             return response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         hints = {400: "参数错误", 401: "密钥无效", 402: "余额不足", 429: "请求过于频繁", 503: "服务繁忙"}
