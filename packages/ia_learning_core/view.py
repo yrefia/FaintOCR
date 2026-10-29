@@ -4,6 +4,8 @@ from PySide6.QtCore import Qt, QRectF, QPointF, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QTextLayout, QTextOption, QTextCharFormat, QPainterPath
 from PySide6.QtWidgets import QWidget
 
+from .core import utf16_offsets
+
 PHRASE_UNDERLINE_COLOR = '#7BDCE8'
 PALETTE = {'original':(245,246,250,255), 'syntax':(154,132,255,51), 'expression':(123,220,232,255), 'word':(245,216,166,255)}
 LAYERS = {'word', 'phrase', 'grammar'}
@@ -15,9 +17,8 @@ def rgba(value, alpha=255):
 
 class AnnotatedTextView(QWidget):
     annotation_clicked = Signal(int)
-    blank_pressed = Signal(object)
-    blank_moved = Signal(object)
-    blank_released = Signal()
+    # 文字区内边距；外壳通过 preferred_height() 取高度，不必知道这些数字。
+    MARGIN_X, MARGIN_TOP, MARGIN_BOTTOM = 31, 24, 42
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -30,7 +31,6 @@ class AnnotatedTextView(QWidget):
         self.text_layout = None
         self.rects = []
         self.content_height = 0
-        self._blank_pressed = False
         self.timer = QTimer(self)
         self.timer.setInterval(16)
         self.timer.timeout.connect(self.animate)
@@ -55,7 +55,12 @@ class AnnotatedTextView(QWidget):
         self.set_content(self.source, self.items, layers)
 
     def text_area(self):
-        return QRectF(31, 24, self.width()-62, max(50, self.height()-66))
+        return QRectF(self.MARGIN_X, self.MARGIN_TOP, self.width()-2*self.MARGIN_X,
+                      max(50, self.height()-self.MARGIN_TOP-self.MARGIN_BOTTOM))
+
+    def preferred_height(self):
+        """Widget height that shows the laid-out text without scrolling."""
+        return int(self.content_height + self.MARGIN_TOP + self.MARGIN_BOTTOM)
 
     def resizeEvent(self, event):
         self.hovered = None
@@ -66,9 +71,7 @@ class AnnotatedTextView(QWidget):
 
     def relayout(self):
         # Qt offsets use UTF-16; source ranges use Python Unicode code points.
-        offsets = [0]
-        for char in self.source:
-            offsets.append(offsets[-1] + (2 if ord(char) > 0xffff else 1))
+        offsets = utf16_offsets(self.source)
         self.text_layout = QTextLayout(self.source.replace('\n', '\u2028'), self.text_font)
         option = QTextOption()
         option.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
@@ -91,7 +94,7 @@ class AnnotatedTextView(QWidget):
             line = self.text_layout.createLine()
             if not line.isValid():
                 break
-            line.setLineWidth(max(50, self.width()-62))
+            line.setLineWidth(max(50, self.width()-2*self.MARGIN_X))
             line.setPosition(QPointF(0, y))
             y += line.height()
         self.text_layout.endLayout()
@@ -107,7 +110,7 @@ class AnnotatedTextView(QWidget):
                     a, b = max(offsets[start], line.textStart()), min(offsets[end], line.textStart()+line.textLength())
                     if a < b:
                         x1, x2 = line.cursorToX(a)[0], line.cursorToX(b)[0]
-                        self.rects[number].append(QRectF(31+x1, line.y(), max(1,x2-x1), line.height()))
+                        self.rects[number].append(QRectF(self.MARGIN_X+x1, line.y(), max(1,x2-x1), line.height()))
 
 
     def text_top(self):
@@ -150,13 +153,13 @@ class AnnotatedTextView(QWidget):
             p.setPen(QColor(*PALETTE["original"]))
             p.save()
             p.setClipPath(all_text.subtracted(target), Qt.IntersectClip)
-            self.text_layout.draw(p, QPointF(31, self.text_top()-self.scroll))
+            self.text_layout.draw(p, QPointF(self.MARGIN_X, self.text_top()-self.scroll))
             p.restore()
             if not target.isEmpty():
                 p.save()
                 p.translate(0, -self.lift)
                 p.setClipPath(target, Qt.IntersectClip)
-                self.text_layout.draw(p, QPointF(31, self.text_top()-self.scroll))
+                self.text_layout.draw(p, QPointF(self.MARGIN_X, self.text_top()-self.scroll))
                 p.restore()
         p.end()
 
@@ -203,21 +206,14 @@ class AnnotatedTextView(QWidget):
 
 
     def mouseMoveEvent(self, event):
-        if self._blank_pressed:
-            self.blank_moved.emit(event.globalPosition())
-        else:
-            self.focus(self.target_at(event.position()))
+        self.focus(self.target_at(event.position()))
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            target = self.target_at(event.position())
-            if target is None:
-                self._blank_pressed = True
-                self.blank_pressed.emit(event.globalPosition())
-            else:
-                self.annotation_clicked.emit(target)
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton and self._blank_pressed:
-            self._blank_pressed = False
-            self.blank_released.emit()
+        if event.button() != Qt.LeftButton:
+            return
+        target = self.target_at(event.position())
+        if target is not None:
+            self.annotation_clicked.emit(target)
+        elif (handle := self.window().windowHandle()) is not None:
+            # 按住空白处拖动所在窗口，交给系统完成移动。
+            handle.startSystemMove()

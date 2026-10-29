@@ -1,25 +1,24 @@
 """Learning annotation application entry point."""
 from pathlib import Path
+import importlib.util
 import sys
 import json
 import time
 
-try:  # 已安装（含 pip install -e .）时直接使用安装的包。
-    from ia_learning_core import core, prompt_path
-    from ia_learning_core.view import AnnotatedTextView, rgba
-except ModuleNotFoundError as exc:  # 源码未安装时回退到仓库内 packages/。
-    if exc.name != 'ia_learning_core':
-        raise
+# 已安装（含 pip install -e .）时直接使用安装的包；未安装时才回退到仓库内 packages/。
+if importlib.util.find_spec('ia_learning_core') is None:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'packages'))
-    from ia_learning_core import core, prompt_path
-    from ia_learning_core.view import AnnotatedTextView, rgba
+from ia_learning_core import core, prompt_path
+from ia_learning_core.view import AnnotatedTextView, rgba
 from ia_learning_core.core import (CATEGORIES, AnnotationError, PromptFile,
-    compose_annotation_payload, compose_explanation_payload, format_request)
-from PySide6.QtCore import Qt, QRectF, QPointF, QTimer, Signal
+    compose_annotation_payload, compose_explanation_payload, format_request, utf16_offsets)
+from PySide6.QtCore import Qt, QRectF, QTimer, Signal
 from PySide6.QtGui import (QColor, QFont, QPainter, QPen, QLinearGradient, QTextCursor)
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QPlainTextEdit, QLineEdit, QPushButton, QLabel, QSplitter, QTreeWidget,
     QTreeWidgetItem, QTextEdit, QTabWidget, QCheckBox, QComboBox, QTextBrowser, QMessageBox)
+
+DEMO_TITLE = 'FaintOCR Demo 5.5.0'
 
 # User-supplied annotation fixture; explanatory text is local demo data only.
 SAMPLE = 'Only by calling our cherished assumptions into question can we approach the truth with intellectual humility.'
@@ -55,21 +54,27 @@ class SubtitleWindow(QWidget):
     def __init__(self):
         super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setWindowTitle('FaintOCR Demo 5.5.0 · 字幕')
+        self.setWindowTitle(f'{DEMO_TITLE} · 字幕')
         self.resize(980,180)
-        self.drag_origin = None
-        self.info_height, self.info_visible = 220, False
+        self.info_height = 220
         self.view = AnnotatedTextView(self)
         self.view.annotation_clicked.connect(self.selected.emit)
-        self.view.blank_pressed.connect(self.start_drag)
-        self.view.blank_moved.connect(self.drag_to)
-        self.view.blank_released.connect(self.finish_drag)
-        self.info = QTextBrowser(self)
+        self.info = QTextBrowser()
         self.info.setOpenLinks(False)
         self.info.setFont(QFont('Microsoft YaHei UI',11))
         self.info.setStyleSheet('QTextBrowser { background: transparent; color: #F5F6FA; border: 0; border-top: 1px solid rgba(230,220,255,60); padding-top: 10px; }')
-        self.info.hide()
-        self.position_children()
+        # 解释区与字幕文字左右对齐，底部给圆角边框留出位置。
+        self.info_panel = QWidget()
+        panel = QVBoxLayout(self.info_panel)
+        panel.setContentsMargins(AnnotatedTextView.MARGIN_X, 0, AnnotatedTextView.MARGIN_X, 28)
+        panel.addWidget(self.info)
+        self.info_panel.setFixedHeight(self.info_height)
+        self.info_panel.hide()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self.view, 1)
+        layout.addWidget(self.info_panel)
 
     @property
     def source(self): return self.view.source
@@ -85,45 +90,21 @@ class SubtitleWindow(QWidget):
         super().hideEvent(event)
         self.visibility_changed.emit(False)
 
-    def position_children(self):
-        if not hasattr(self,'view'): return
-        self.view.setGeometry(0,0,self.width(),self.height()-(self.info_height if self.info_visible else 0))
-        self.info.setGeometry(31,self.height()-self.info_height-28,self.width()-62,self.info_height)
-
-    def resizeEvent(self,event):
-        self.position_children()
-        super().resizeEvent(event)
-
     def set_content(self,source,items,enabled=None):
-        self.info_visible=False
-        self.info.clear();self.info.hide()
-        self.position_children()
+        self.info.clear();self.info_panel.hide()
         self.view.set_content(source,items,enabled)
         screen=self.screen().availableGeometry()
-        self.resize(self.width(),max(self.height(),min(max(180,int(self.view.content_height+66)),int(screen.height()*.6))))
-        self.position_children()
+        self.resize(self.width(),max(self.height(),min(max(180,self.view.preferred_height()),int(screen.height()*.6))))
         self.update()
 
     def show_explanation(self,number,text):
         item=self.items[number]
-        if not self.info_visible:
-            self.info_visible=True
+        if self.info_panel.isHidden():
             cap=self.screen().availableGeometry().height()-40
-            self.resize(self.width(),max(self.height(),min(max(180,int(self.view.content_height+66))+self.info_height,cap)))
-        self.position_children()
+            self.resize(self.width(),max(self.height(),min(max(180,self.view.preferred_height())+self.info_height,cap)))
         self.info.setPlainText(f"{CATEGORIES[item['category']][0]} · {item['subtype'] + ' · ' if item['subtype'] else ''}{item['unit']}\n{text}")
         self.info.verticalScrollBar().setValue(0)
-        self.info.show()
-        self.view.relayout();self.view.update()
-
-    def start_drag(self,global_position):
-        self.drag_origin=global_position-QPointF(self.pos())
-
-    def drag_to(self,global_position):
-        if self.drag_origin is not None:
-            self.move((global_position-self.drag_origin).toPoint())
-
-    def finish_drag(self): self.drag_origin=None
+        self.info_panel.show()
 
     def closeEvent(self,event):
         self.view.focus(None)
@@ -144,6 +125,26 @@ class SubtitleWindow(QWidget):
         p.setPen(QPen(rgba('#ffffff',28),1))
         p.drawRoundedRect(body,22,22)
         p.end()
+
+
+def confirm_discard(parent, text):
+    """True when the user agrees to drop unsaved prompt edits."""
+    answer = QMessageBox.question(parent, '未保存提示词', text, QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Cancel)
+    return answer == QMessageBox.Discard
+
+
+def range_cursor(editor, offsets, start, end):
+    """QTextCursor over Python indices [start, end) of the editor text; offsets come from utf16_offsets."""
+    cursor = editor.textCursor()
+    cursor.setPosition(offsets[start])
+    cursor.setPosition(offsets[end], QTextCursor.KeepAnchor)
+    return cursor
+
+
+def select_range(editor, start, end):
+    editor.setTextCursor(range_cursor(editor, utf16_offsets(editor.toPlainText()), start, end))
+    editor.setFocus()
+    editor.ensureCursorVisible()
 
 
 class PromptEditor(QWidget):
@@ -182,13 +183,8 @@ class PromptEditor(QWidget):
             self.note.setText(status + ' · 请求使用当前编辑内容。')
 
     def reload_prompt(self):
-        if self.has_unsaved():
-            answer = QMessageBox.question(
-                self, '未保存提示词', '重新加载会丢弃当前未保存修改，是否继续？',
-                QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Cancel,
-            )
-            if answer != QMessageBox.Discard:
-                return
+        if self.has_unsaved() and not confirm_discard(self, '重新加载会丢弃当前未保存修改，是否继续？'):
+            return
         try:
             content = self.file.read()
         except (OSError, UnicodeError) as exc:
@@ -215,9 +211,11 @@ class PromptEditor(QWidget):
 class AnnotationWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('FaintOCR Demo 5.5.0 · 学习元素标注')
+        self.setWindowTitle(f'{DEMO_TITLE} · 学习元素标注')
         self.resize(1120, 760)
         self.source, self.items = '', []
+        # 最近一次渲染所用的返回 JSON 及其位置索引，用于判断编辑区是否已改动。
+        self.rendered_raw, self.rendered_locations = None, {}
         self.core = core.LearningCore()
         self.offline = False
         self.busy = False
@@ -370,7 +368,7 @@ class AnnotationWindow(QWidget):
         self.subtitle.raise_()
 
     def render(self, *_):
-        self.core.selected_explanation = None
+        self.core.clear_selection()
         enabled = {key for key, check in self.filters.items() if check.isChecked()}
         self.subtitle.set_content(self.source, self.items, enabled)
         self.tree.clear()
@@ -437,19 +435,12 @@ class AnnotationWindow(QWidget):
         self.raw.setExtraSelections([])
 
     def navigate_error(self, entry, column=0):
-        start, end = entry.data(0, Qt.UserRole)
-        content = self.raw.toPlainText()
-        cursor = self.raw.textCursor()
-        cursor.setPosition(len(content[:start].encode('utf-16-le')) // 2)
-        cursor.setPosition(len(content[:end].encode('utf-16-le')) // 2, QTextCursor.KeepAnchor)
-        self.raw.setTextCursor(cursor)
-        self.raw.setFocus()
-        self.raw.ensureCursorVisible()
+        select_range(self.raw, *entry.data(0, Qt.UserRole))
 
     def show_json_error(self, error):
         self.clear_errors()
         content=self.raw.toPlainText()
-        locations=self.rendered_locations if content==getattr(self,'rendered_raw',None) else core.decode_best_effort(content)[1]
+        locations=self.rendered_locations if content==self.rendered_raw else core.decode_best_effort(content)[1]
         entries=core.warning_locations(content,locations,getattr(error,'errors',[error]))
         for label,message,start,end in entries:
             entry=QTreeWidgetItem([label,message])
@@ -486,18 +477,16 @@ class AnnotationWindow(QWidget):
     def highlight_item_json(self, number):
         if not isinstance(number,int) or not 0 <= number < len(self.items): return
         raw=self.raw.toPlainText()
-        if raw != getattr(self,'rendered_raw',None):
+        if raw != self.rendered_raw:
             self.status.setText('提醒：返回 JSON 已编辑，请先应用后再定位元素。')
             return
         item=self.items[number]; annotation=item['annotation']
         ranges=core.item_json_ranges(item,raw,self.rendered_locations)
         selections=[]
+        offsets=utf16_offsets(raw)
         for start,end in ranges:
             selection=QTextEdit.ExtraSelection()
-            cursor=self.raw.textCursor()
-            cursor.setPosition(len(raw[:start].encode('utf-16-le'))//2)
-            cursor.setPosition(len(raw[:end].encode('utf-16-le'))//2,QTextCursor.KeepAnchor)
-            selection.cursor=cursor
+            selection.cursor=range_cursor(self.raw,offsets,start,end)
             selection.format.setBackground(QColor('#665128'))
             selection.format.setForeground(QColor('#fff1bc'))
             selections.append(selection)
@@ -551,11 +540,10 @@ class AnnotationWindow(QWidget):
                 self.status.setText('请求提醒：'+event['data']+'；已显示本次原文。')
 
     def closeEvent(self, event):
-        if self.annotation_library.has_unsaved() or self.explanation_library.has_unsaved():
-            answer = QMessageBox.question(self, '未保存提示词', '有未保存的提示词草稿。是否放弃草稿并关闭？', QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Cancel)
-            if answer != QMessageBox.Discard:
-                event.ignore()
-                return
+        unsaved = self.annotation_library.has_unsaved() or self.explanation_library.has_unsaved()
+        if unsaved and not confirm_discard(self, '有未保存的提示词草稿。是否放弃草稿并关闭？'):
+            event.ignore()
+            return
         self.core.close()
         self.preview_timer.stop()
         self.poll_timer.stop()

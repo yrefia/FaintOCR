@@ -12,7 +12,7 @@ Demo 只需要 Qt 界面，见 `requirements-demo.txt`（`PySide6-Essentials==6.
 .venv\Scripts\python.exe -m pip install -e .
 ```
 
-5.4.3 是外部历史对照文件，不保存在本项目中，也不是公共包调用方。对照测试通过 `FAINTOCR_REFERENCE_PATH` 指定其路径，见根目录 README.md。
+5.4.3 是外部历史对照文件，不保存在本项目中，也不是公共包调用方。对照测试默认读取本机固定路径，也可通过 `FAINTOCR_REFERENCE_PATH` 指定，见根目录 README.md。
 
 5.5.0 读取公共包的 `annotation.txt` 和 `explanation.txt`，支持编辑、保存和重新加载，不扫描版本。
 

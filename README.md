@@ -169,7 +169,7 @@ Git 分支为 `main`，已建立提交历史；尚未设置远程仓库。公共
 
 ## 验证
 
-对照检查使用外部文件，可先设置（未设置时仅跳过对照检查，其余检查继续）：
+对照检查默认读取本机 `D:\IA\OCR\FaintOCR\Codeia\5.x\Demo 5.4.3.py`；其他机器（如 CI）可用环境变量指定，文件不存在时仅跳过对照检查，其余检查继续：
 
 ```powershell
 $env:FAINTOCR_REFERENCE_PATH = "D:\IA\OCR\FaintOCR\Codeia\5.x\Demo 5.4.3.py"
@@ -177,7 +177,7 @@ $env:FAINTOCR_REFERENCE_PATH = "D:\IA\OCR\FaintOCR\Codeia\5.x\Demo 5.4.3.py"
 
 两条检查，互不干扰：
 
-- 回归单测：`.venv\Scripts\python.exe -B -m unittest discover -s tests -v`，共 38 项检查（含 FaintOCR 路径/文件 I/O 的 7 项、接口兼容性的 6 项、打包约束的 6 项）：密钥解析优先级（界面密钥、环境变量、用户配置、仓库根目录）与无效配置提示，固定提示词加载与保存保护、提示词目录覆盖与用户副本、5.4.3 对照解析及请求协议、真实 Qt 离屏启动与绘制、6 个离线标注的选择、错误恢复，模拟标注/解释请求、缓存和失败处理，以及 extras 与 requirements 文件的一致性、`core.py` 只依赖标准库、入口优先使用已安装包。均已在 Python 3.14.10 + PySide6-Essentials 6.12.0 下通过，不调用真实 API。
+- 回归单测：`.venv\Scripts\python.exe -B -m unittest discover -s tests -v`，共 50 项检查（含 FaintOCR 路径/文件 I/O 的 7 项、接口兼容性的 6 项、打包约束的 6 项）：密钥解析优先级（界面密钥、环境变量、用户配置、仓库根目录）与无效配置提示，固定提示词加载与保存保护、提示词目录覆盖与用户副本、5.4.3 对照解析及请求协议、真实 Qt 离屏启动与绘制、6 个离线标注的选择、错误恢复，模拟标注/解释请求、缓存和失败处理，以及 extras 与 requirements 文件的一致性、`core.py` 只依赖标准库、入口优先使用已安装包。均已在 Python 3.14.10 + PySide6-Essentials 6.12.0 下通过，不调用真实 API。
 - 环境自检：`.venv\Scripts\python.exe tests\check_rapidocr.py`，渲染中英文图片并真实调用 RapidOCR，首次运行需下载约 30 MB 模型。
 - 代码检查：`.venv\Scripts\ruff.exe check .`（规则见 `pyproject.toml`），CI 配置见 `.github/workflows/ci.yml`。
 

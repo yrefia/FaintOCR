@@ -159,6 +159,14 @@ def json_locations(raw):
     return locations
 
 
+def utf16_offsets(text):
+    """offsets[i] is the UTF-16 index of Python index i in text (Qt positions are UTF-16)."""
+    offsets = [0]
+    for char in text:
+        offsets.append(offsets[-1] + (2 if ord(char) > 0xffff else 1))
+    return offsets
+
+
 def decoded_boundaries(raw, start, end):
     """Map decoded string characters to raw JSON, including escaped surrogate pairs."""
     positions = []; i = start+1
@@ -373,35 +381,28 @@ def raise_api_error(body):
         raise ValueError(f'API 错误：{detail}')
 
 
-def response_json(body):
-    """Decode actual JSON; no reconstruction of truncated or malformed content."""
+def extract_choice(body):
+    """(content, finish_reason) of the first choice; error bodies and bad shapes raise ValueError."""
     raise_api_error(body)
-    try:
-        content = json.loads(body)["choices"][0]["message"]["content"]
-        if not isinstance(content, str) or not content.strip():
-            raise ValueError("模型返回空内容。")
-        return json.loads(content)
-    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
-        raise ValueError("API 返回内容无法读取为 JSON。") from exc
-
-
-def annotation_content(body):
     try:
         choice = json.loads(body)['choices'][0]
         content = choice['message']['content']
-        if not isinstance(content, str):
-            raise ValueError('模型没有返回 JSON 文本。')
-        if choice.get('finish_reason') not in (None, 'stop'):
-            raise ValueError('标注输出未完整结束，请缩短原文重试。')
-        return content
-    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
         raise ValueError('API 返回格式无效。') from exc
+    if not isinstance(content, str):
+        raise ValueError('响应没有可读取的文本内容。')
+    return content, choice.get('finish_reason')
 
 
-def parse_response(body, english):
-    content = annotation_content(body)
-    value = json.loads(content)
-    return value, resolve_items(value, english)
+def response_json(body):
+    """Decode actual JSON; no reconstruction of truncated or malformed content."""
+    content, _ = extract_choice(body)
+    if not content.strip():
+        raise ValueError("模型返回空内容。")
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise ValueError("API 返回内容无法读取为 JSON。") from exc
 
 
 def build_explanation_payload(source, item, prompt, model):
@@ -493,11 +494,8 @@ def warning_locations(raw, locations, warnings):
             line = raw.count('\n', 0, start) + 1
             entries.append((f'返回 JSON · 第 {line} 行', str(issue), start, end))
             continue
+        # resolve_items 给每条句子级提醒都附带了 path，直接按它定位，不从提示文字反解句号。
         path = getattr(issue, 'path', ())
-        if not path:
-            sentence = re.search(r'第 (\d+) 句', str(issue))
-            if sentence:
-                path = ('sentences', int(sentence[1])-1)
         while path not in locations and path:
             path = path[:-1]
         start, end = locations.get(path, (0, len(raw)))
@@ -566,9 +564,20 @@ class LearningCore:
         self.annotation_pending = False
         self._annotation_signature = None
 
-    def set_text(self, source):
+    def clear_selection(self):
+        """Forget which explanation the UI waits for; pending results stay cached."""
+        self.selected_explanation = None
+
+    def _ensure_open(self):
         if self._closed:
             raise RuntimeError('会话已关闭。')
+
+    def _resolve_key(self, key):
+        """A non-empty key from the caller wins; otherwise read the configured credential."""
+        return key.strip() if isinstance(key, str) and key.strip() else load_deepseek_api_key(self.config_path)
+
+    def set_text(self, source):
+        self._ensure_open()
         self.reset()
         self.document = {'source':source, 'items':[], 'warnings':[], 'raw':'', 'locations':{}}
         return self.document
@@ -585,15 +594,7 @@ class LearningCore:
             try:
                 body = self.transport(key, snapshot)
                 if kind == 'annotation':
-                    raise_api_error(body)
-                    try:
-                        choice = json.loads(body)['choices'][0]
-                        raw = choice['message']['content']
-                    except (KeyError, IndexError, TypeError, ValueError) as exc:
-                        raise ValueError('API 返回格式无效。') from exc
-                    if not isinstance(raw, str):
-                        raise ValueError('响应没有可读取的文本内容。')
-                    data = (raw, choice.get('finish_reason'))
+                    data = extract_choice(body)
                 else:
                     data = parse_explanation(body)
                 event = {'kind':kind, 'token':token, 'success':True, 'data':data}
@@ -607,11 +608,10 @@ class LearningCore:
         threading.Thread(target=run, daemon=True).start()
 
     def annotate(self, source, prompt, model, *, key=None):
-        if self._closed:
-            raise RuntimeError('会话已关闭。')
+        self._ensure_open()
         # 先校验输入，避免输入有误时却提示缺少密钥。
         payload = build_payload(source, prompt, model)
-        key = key.strip() if isinstance(key, str) and key.strip() else load_deepseek_api_key(self.config_path)
+        key = self._resolve_key(key)
         signature = (source, prompt, model)
         if self.annotation_pending and signature == self._annotation_signature:
             return {'state':'pending', 'payload':None}
@@ -622,8 +622,7 @@ class LearningCore:
         return {'state':'started', 'payload':payload}
 
     def explain(self, number, prompt, model, *, key=None):
-        if self._closed:
-            raise RuntimeError('会话已关闭。')
+        self._ensure_open()
         if not 0 <= number < len(self.document['items']):
             raise ValueError('请选择有效标注。')
         token = (self.revision, number, prompt, model)
@@ -633,7 +632,7 @@ class LearningCore:
         if token in self.explanation_pending:
             return {'state':'pending', 'text':'正在解释…', 'payload':None}
         payload = build_explanation_payload(self.document['source'], self.document['items'][number], prompt, model)
-        key = key.strip() if isinstance(key, str) and key.strip() else load_deepseek_api_key(self.config_path)
+        key = self._resolve_key(key)
         self.explanation_pending.add(token)
         self._launch('explanation', token, key, payload)
         return {'state':'started', 'text':'正在解释…', 'payload':payload}

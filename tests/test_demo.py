@@ -17,12 +17,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'packages'))
 from ia_learning_core import core, PROMPT_ROOT
 
+# 本机对照文件的固定位置；其他机器（如 CI）用 FAINTOCR_REFERENCE_PATH 指定，缺失时才跳过。
+DEFAULT_REFERENCE_PATH = Path(r'D:\IA\OCR\FaintOCR\Codeia\5.x\Demo 5.4.3.py')
+
 
 def baseline_logic():
-    configured = os.environ.get('FAINTOCR_REFERENCE_PATH')
-    if not configured or not Path(configured).is_file():
-        raise unittest.SkipTest('Set FAINTOCR_REFERENCE_PATH to the external comparison source')
-    path = Path(configured)
+    path = Path(os.environ.get('FAINTOCR_REFERENCE_PATH') or DEFAULT_REFERENCE_PATH)
+    if not path.is_file():
+        raise unittest.SkipTest(f'5.4.3 对照文件不存在：{path}；请设置 FAINTOCR_REFERENCE_PATH')
     tree = ast.parse(path.read_text(encoding='utf-8-sig'))
     nodes = []
     constants = {'API_URL', 'CATEGORIES', 'MAX_EXPLANATION_CHARS',
@@ -118,6 +120,25 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(len(w.items), 6)
         # The text layout must not shadow QWidget.layout().
         self.assertIsNone(w.subtitle.view.layout())
+
+    def test_subtitle_layout_and_utf16_selection(self):
+        w, subtitle = self.window, self.window.subtitle
+        w.demo()
+        self.app.processEvents()
+        self.assertTrue(subtitle.info_panel.isHidden())
+        self.assertEqual(subtitle.view.height(), subtitle.height())
+        self.assertGreaterEqual(subtitle.height(), subtitle.view.preferred_height())
+        w.select_item(0)
+        self.app.processEvents()
+        self.assertFalse(subtitle.info_panel.isHidden())
+        self.assertEqual(subtitle.view.height() + subtitle.info_height, subtitle.height())
+        self.assertTrue(subtitle.info.toPlainText().strip())
+        # Characters outside the BMP take two UTF-16 units in Qt; selections must still match Python indices.
+        text = '前😀后 {"a": "😀x"}'
+        w.raw.setPlainText(text)
+        start = text.index('x')
+        self.module['select_range'](w.raw, start, start + 1)
+        self.assertEqual(w.raw.textCursor().selectedText(), 'x')
 
     def test_mock_annotation_explanation_cache_and_failure(self):
         w = self.window

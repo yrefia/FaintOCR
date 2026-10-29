@@ -56,6 +56,39 @@ class ApiErrorTests(unittest.TestCase):
         [event] = self.events(session)
         self.assertEqual(event['data'], 'API 返回格式无效。')
 
+    def test_extract_choice_returns_content_and_reason(self):
+        body = json.dumps({'choices': [{'message': {'content': '{}'}, 'finish_reason': 'length'}]})
+        self.assertEqual(core.extract_choice(body), ('{}', 'length'))
+        for bad in ('not json', '{}', json.dumps({'choices': [{'message': {'content': None}}]})):
+            with self.assertRaises(ValueError):
+                core.extract_choice(bad)
+        with self.assertRaisesRegex(ValueError, 'Model Not Exist'):
+            core.extract_choice(ERROR_BODY)
+
+    def test_session_helpers(self):
+        session = core.LearningCore()
+        session.selected_explanation = (0, 0, 'p', 'm')
+        session.clear_selection()
+        self.assertIsNone(session.selected_explanation)
+        self.assertEqual(session._resolve_key('  ui-key '), 'ui-key')
+        session.close()
+        for call in (lambda: session.set_text('x'), lambda: session.annotate('Hi.', 'JSON', 'm', key='k'),
+                     lambda: session.explain(0, 'JSON', 'm', key='k')):
+            with self.assertRaisesRegex(RuntimeError, '会话已关闭'):
+                call()
+
+    def test_utf16_offsets_count_surrogate_pairs(self):
+        self.assertEqual(core.utf16_offsets('a😀b'), [0, 1, 3, 4])
+
+    def test_warning_locations_use_structured_paths(self):
+        raw = json.dumps({'sentences': [{'source': 'A.', 'annotated': 'A.', 'annotations': []},
+                                        {'source': 'B.', 'annotated': 'B.', 'annotations': []}]})
+        _, locations, _ = core.decode_best_effort(raw)
+        issue = core.AnnotationError('第 1 句：提示文字里的句号不再参与定位。', ('sentences', 1))
+        [(label, _, start, end)] = core.warning_locations(raw, locations, [issue])
+        self.assertEqual(label, '第 2 句')
+        self.assertEqual((start, end), locations[('sentences', 1)])
+
     def test_input_errors_win_over_missing_key(self):
         session = core.LearningCore()
         self.addCleanup(session.close)

@@ -89,8 +89,9 @@ class PackagingTests(unittest.TestCase):
 
     def test_entry_point_prefers_installed_package(self):
         entry = (ROOT / 'projects/faintocr-demo/main.py').read_text(encoding='utf-8')
-        self.assertLess(entry.index('from ia_learning_core'), entry.index('sys.path.insert'),
-                        '入口应先尝试已安装的包，只在导入失败时回退到源码路径')
+        guard = "if importlib.util.find_spec('ia_learning_core') is None:\n    sys.path.insert("
+        self.assertIn(guard, entry, '入口应先查找已安装的包，只在找不到时回退到源码路径')
+        self.assertEqual(entry.count('sys.path.insert'), 1)
 
 
 if __name__ == '__main__':
