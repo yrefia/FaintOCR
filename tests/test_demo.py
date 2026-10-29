@@ -122,7 +122,7 @@ class DemoTests(unittest.TestCase):
             content = {'explanation': 'Mock explanation'} if 'annotation' in user else self.module['DEMO']
             return json.dumps({'choices': [{'message': {'content': json.dumps(content)}, 'finish_reason': 'stop'}]})
         w.core.transport = transport
-        self.config_dir = tempfile.TemporaryDirectory()
+        self.config_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.config_dir.cleanup)
         config = Path(self.config_dir.name) / 'deepseek_api_key.json'
         config.write_text(json.dumps({'api_key': 'test-key'}), encoding='utf-8')
@@ -164,7 +164,7 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(keys, ['ui-test-key', 'ui-test-key'])
 
     def test_editor_save_reload_conflict_and_cancel(self):
-        with tempfile.TemporaryDirectory() as folder:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
             path = Path(folder) / 'annotation.txt'
             path.write_text('original', encoding='utf-8')
             editor = self.module['PromptEditor'](path)

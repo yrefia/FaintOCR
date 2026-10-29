@@ -1,0 +1,5 @@
+# FaintOCR Demo 的最小直接依赖：只有 Qt 界面，且只需要 Essentials 模块
+# （QtCore / QtGui / QtWidgets）。WebEngine、Pdf、Addons 均未被使用。
+# ia_learning_core 的解析与请求模块只用标准库，核心本身没有第三方依赖。
+# 安装：.venv\Scripts\python.exe -m pip install -r requirements-demo.txt
+PySide6-Essentials==6.12.0

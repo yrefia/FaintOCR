@@ -1,0 +1,12 @@
+# FaintOCR 4.2.2 的直接运行依赖：Qt 界面（仅 Essentials 模块）+ RapidOCR 推理链
+# + 抓屏 / 日志 / HTTP。需要精确复现整个工作区环境时用 requirements.txt。
+# 安装：.venv\Scripts\python.exe -m pip install -r requirements-faintocr.txt
+PySide6-Essentials==6.12.0
+loguru==0.7.3
+mss==10.2.0
+onnxruntime==1.31.1
+orjson==3.13.0
+RapidFuzz==3.14.6
+rapidocr==3.10.0
+requests==2.34.2
+win32-setctime==1.2.1

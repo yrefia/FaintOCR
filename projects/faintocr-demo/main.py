@@ -2,18 +2,21 @@
 from pathlib import Path
 import sys
 import json
-import re
 import time
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages"))
-from ia_learning_core import core
-from ia_learning_core.view import AnnotatedTextView, rgba
+
+try:  # 已安装（含 pip install -e .）时直接使用安装的包。
+    from ia_learning_core import core, prompt_path
+    from ia_learning_core.view import AnnotatedTextView, rgba
+except ModuleNotFoundError as exc:  # 源码未安装时回退到仓库内 packages/。
+    if exc.name != 'ia_learning_core':
+        raise
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'packages'))
+    from ia_learning_core import core, prompt_path
+    from ia_learning_core.view import AnnotatedTextView, rgba
 from ia_learning_core.core import (CATEGORIES, AnnotationError, PromptFile,
-    compose_annotation_payload, compose_explanation_payload, format_request,
-    decode_best_effort, decoded_boundaries, TAG_RE)
-from ia_learning_core import PROMPT_ROOT
+    compose_annotation_payload, compose_explanation_payload, format_request)
 from PySide6.QtCore import Qt, QRectF, QPointF, QTimer, Signal
-from PySide6.QtGui import (QColor, QFont, QPainter, QPen, QLinearGradient,
-                          QTextLayout, QTextOption, QTextCharFormat, QPainterPath, QTextCursor)
+from PySide6.QtGui import (QColor, QFont, QPainter, QPen, QLinearGradient, QTextCursor)
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QPlainTextEdit, QLineEdit, QPushButton, QLabel, QSplitter, QTreeWidget,
     QTreeWidgetItem, QTextEdit, QTabWidget, QCheckBox, QComboBox, QTextBrowser, QMessageBox)
@@ -237,10 +240,10 @@ class AnnotationWindow(QWidget):
             top.addWidget(widget)
         root.addLayout(top)
         splitter = QSplitter()
-        self.annotation_library = PromptEditor(PROMPT_ROOT / 'annotation.txt')
+        self.annotation_library = PromptEditor(prompt_path('annotation.txt'))
         self.prompt = self.annotation_library.editor
         self.prompt.setPlaceholderText('第一层：中文标注提示词')
-        self.explanation_library = PromptEditor(PROMPT_ROOT / 'explanation.txt')
+        self.explanation_library = PromptEditor(prompt_path('explanation.txt'))
         self.explanation_prompt = self.explanation_library.editor
         prompt_tabs = QTabWidget()
         prompt_tabs.addTab(self.annotation_library, '第一层 · 仅标注')

@@ -3,6 +3,7 @@
 from pathlib import Path
 import copy
 import json
+import os
 import queue
 import re
 import threading
@@ -10,29 +11,60 @@ import time
 import urllib.error
 import urllib.request
 
+# 密钥解析与源码目录布局解耦。优先级：
+#   显式参数 > DEEPSEEK_API_KEY > IA_LEARNING_CONFIG_PATH > 用户配置目录 > 仓库根目录旧位置。
+API_KEY_ENV = 'DEEPSEEK_API_KEY'
+CONFIG_PATH_ENV = 'IA_LEARNING_CONFIG_PATH'
+USER_CONFIG_ROOT = Path(os.environ.get('APPDATA') or Path.home() / '.config') / 'IA' / 'ia-learning-core'
+USER_CONFIG_PATH = USER_CONFIG_ROOT / 'deepseek_api_key.json'
+# 源码检出时的历史位置，仅作为最后一个候选。
 DEEPSEEK_CONFIG_PATH = Path(__file__).resolve().parents[2] / 'deepseek_api_key.json'
 
 
+def config_candidates():
+    """Credential files in priority order; the first existing file wins."""
+    configured = os.environ.get(CONFIG_PATH_ENV, '').strip()
+    if configured:
+        yield Path(configured)
+    yield USER_CONFIG_PATH
+    yield DEEPSEEK_CONFIG_PATH
+
+
+def _validated_key(value):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError('请在 deepseek_api_key.json 中填写非空字符串 api_key、设置 DEEPSEEK_API_KEY 环境变量，或使用离线演示。')
+    key = value.strip()
+    if any(ord(char) < 33 or ord(char) > 126 for char in key):
+        raise ValueError('密钥含有无效字符；请检查 deepseek_api_key.json 或 DEEPSEEK_API_KEY。')
+    return key
+
+
 def load_deepseek_api_key(config_path=None):
-    """Read a local credential without exposing file contents in error messages."""
-    path = Path(config_path) if config_path is not None else DEEPSEEK_CONFIG_PATH
+    """Resolve one credential without exposing file contents in error messages."""
+    if config_path is None:
+        environment_key = os.environ.get(API_KEY_ENV, '').strip()
+        if environment_key:
+            return _validated_key(environment_key)
+    if config_path is not None:
+        path = Path(config_path)
+    else:
+        path = next((candidate for candidate in config_candidates() if candidate.is_file()), None)
+    if path is None:
+        raise ValueError(f'缺少 deepseek_api_key.json：请设置 {API_KEY_ENV}，或在 {USER_CONFIG_PATH} '
+                         '或仓库根目录创建该文件并填写 api_key。')
     try:
         content = path.read_text(encoding='utf-8-sig')
     except FileNotFoundError:
-        raise ValueError('缺少 deepseek_api_key.json，请在仓库根目录创建并填写 api_key。') from None
+        raise ValueError('缺少 deepseek_api_key.json，请创建并填写 api_key。') from None
     except (OSError, UnicodeError):
         raise ValueError('无法读取 deepseek_api_key.json，请检查文件权限和 UTF-8 编码。') from None
     try:
         settings = json.loads(content)
     except ValueError:
         raise ValueError('deepseek_api_key.json 不是有效的 JSON，请检查格式。') from None
-    key = settings.get('api_key') if isinstance(settings, dict) else None
-    if not isinstance(key, str) or not key.strip():
+    if not isinstance(settings, dict):
         raise ValueError('请在 deepseek_api_key.json 中填写非空字符串 api_key，或使用离线演示。')
-    key = key.strip()
-    if any(ord(char) < 33 or ord(char) > 126 for char in key):
-        raise ValueError('deepseek_api_key.json 的 api_key 含有无效字符。')
-    return key
+    return _validated_key(settings.get('api_key'))
 
 
 API_VERSION = 1
@@ -343,7 +375,7 @@ def parse_response(body, english):
 
 
 def build_explanation_payload(source, item, prompt, model):
-    payload = build_payload(source, prompt, model)
+    build_payload(source, prompt, model)  # 复用第一层的输入校验
     return compose_explanation_payload(source, item, prompt, model)
 
 

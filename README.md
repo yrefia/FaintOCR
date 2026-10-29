@@ -17,9 +17,9 @@ projects/
 packages/
 └── ia_learning_core/
     ├── README.md
-    ├── __init__.py
-    ├── core.py
-    ├── view.py
+    ├── __init__.py                # 提示词定位与包入口
+    ├── core.py                    # 标准库实现的请求/解析核心
+    ├── view.py                    # 依赖 PySide6 的标注视图
     └── prompts/
         ├── annotation.txt
         └── explanation.txt
@@ -28,14 +28,20 @@ tests/
 ├── check_faintocr.py
 ├── test_credentials.py
 ├── test_demo.py
+├── test_packaging.py
 ├── test_faintocr_runtime.py
 ├── test_faintocr_compatibility.py
 └── test_prompt_files.py
-requirements.txt
+.github/workflows/ci.yml             # ruff + 单元测试
+pyproject.toml                       # 包元数据、可选依赖（extras）、ruff 配置
+requirements.txt                     # 完整环境快照（OCR + Demo）
+requirements-demo.txt                # Demo 的最小直接依赖
+requirements-faintocr.txt            # FaintOCR 的最小直接依赖
+requirements-dev.txt                 # 开发工具（ruff）
 deepseek_api_key.json                # 本地配置，Git 忽略
 ```
 
-FaintOCR 与 Demo 是两个独立应用。公共包包含学习核心、标注视图和固定提示词资源；提示词编辑器内联在 Demo 5.5.0 内。5.4.3 仅作为外部原始对照基线，不是公共包调用方，也不保存在当前仓库。`ia_` 是 IA 命名空间前缀，不代表版本。`requirements.txt` 锁定工作区 OCR 环境依赖，`tests/check_rapidocr.py` 是环境自检入口，`tests/test_prompt_files.py` 是回归单测。
+FaintOCR 与 Demo 是两个独立应用。公共包包含学习核心、标注视图和固定提示词资源；提示词编辑器内联在 Demo 5.5.0 内。5.4.3 仅作为外部原始对照基线，不是公共包调用方，也不保存在当前仓库。`ia_` 是 IA 命名空间前缀，不代表版本。`ia_learning_core` 已是可安装包（`pyproject.toml`，extras：`demo` / `faintocr` / `dev`）；`requirements.txt` 是完整环境快照，`requirements-demo.txt` 与 `requirements-faintocr.txt` 只列各应用的直接依赖。`tests/check_rapidocr.py` 是环境自检入口，`tests/test_prompt_files.py` 与 `tests/test_packaging.py` 是回归单测。
 
 ## 运行
 
@@ -46,11 +52,36 @@ FaintOCR 与 Demo 是两个独立应用。公共包包含学习核心、标注�
 .venv\Scripts\python.exe projects/faintocr-demo/main.py
 ```
 
+入口优先导入已安装的 `ia_learning_core`；未安装时才回退到仓库内 `packages/`。安装为可编辑包（推荐，导入不再依赖终端工作目录或源码位置）：
+
+```powershell
+.venv\Scripts\python.exe -m pip install -e .
+```
+
 5.4.3 作为外部对照文件，不作为当前环境的运行入口。具体依赖见项目 README.md。导入和资源路径均相对于源码定位，不依赖终端工作目录。
 
 ## Python 环境
 
 工作区默认为 **Python 3.14.10**，虚拟环境位于 `.venv/`，已安装 OCR 依赖 `rapidocr==3.10.0` 与 ONNX Runtime 后端 `onnxruntime==1.31.1`，完整版本见 `requirements.txt`。
+
+依赖按用途拆分，任一文件都可单独安装：
+
+| 文件 | 用途 |
+| --- | --- |
+| `requirements.txt` | 完整环境快照（OCR + Demo），用于复现当前 `.venv` |
+| `requirements-demo.txt` | 只装 Demo：`PySide6-Essentials==6.12.0` |
+| `requirements-faintocr.txt` | 只装 OCR 应用：Qt Essentials + RapidOCR 等直接依赖 |
+| `requirements-dev.txt` | 开发工具 `ruff` |
+
+两个应用只用 QtCore / QtGui / QtWidgets，因此 Qt 依赖只声明 `PySide6-Essentials`；`PySide6` 元包、`PySide6-Addons`、`PySide6-WebEngine`、`PySide6-Pdf` 都不需要，也不再出现在依赖文件中。当前 `.venv` 因此从约 927 MB 降到约 518 MB（WebEngine/Pdf 约 290 MB，Addons 与元包约 105 MB）。
+
+安装示例：
+
+```powershell
+.venv\Scripts\python.exe -m pip install -r requirements-demo.txt   # 只跑 Demo
+.venv\Scripts\python.exe -m pip install -r requirements.txt         # 完整环境
+.venv\Scripts\python.exe -m pip install -r requirements-dev.txt     # 代码检查
+```
 
 选择 3.14 的原因：RapidOCR 的默认后端是 onnxruntime，而 onnxruntime 1.31.1 在 Windows 上只发布到 `cp314` 的 wheel，没有 `cp315`，所以 3.14 是当前能跑通 RapidOCR 的最高 Python 版本；3.14.10 是该分支最新补丁。
 
@@ -82,7 +113,7 @@ $env:UV_PYTHON_INSTALL_DIR = "$PWD\.python"
 
 `tests/check_rapidocr.py` 渲染一张中英文图片并实际调用引擎，用于确认解释器、依赖、模型与推理链路可用；首次运行会把 PP-OCRv6 检测与识别模型下载到 `.venv\Lib\site-packages\rapidocr\models`（约 30 MB），之后可离线运行。它不命名为 `test_*.py`，因此 `unittest discover` 不会自动执行，单测保持快速、无模型依赖。
 
-兼容性说明：`projects/faintocr` 已适配当前 RapidOCR 3.x 的构造参数及输出对象，已补齐运行依赖。FaintOCR 和 Demo 均使用本工作区虚拟环境，原生窗口和生成图片的实际 OCR 流程已验证。
+兼容性说明：`projects/faintocr` 已适配当前 RapidOCR 3.x 的构造参数及输出对象，已补齐运行依赖。FaintOCR 和 Demo 均使用本工作区虚拟环境，原生窗口和生成图片的实际 OCR 流程已验证。`ia_learning_core` 可用 `pip install -e .` 安装（`pyproject.toml` 声明包数据，提示词随 wheel 一起分发），因此入口和测试不再需要 `sys.path` 探测仓库布局。
 
 ## DeepSeek API Key
 
@@ -96,7 +127,15 @@ $env:UV_PYTHON_INSTALL_DIR = "$PWD\.python"
 
 将空字符串替换为自己的密钥。该文件已加入根目录 `.gitignore`，不会随正常 Git 提交入库；新克隆需自行创建。不要强制添加此文件。
 
-`ia_learning_core` 根据自身文件位置定位仓库根目录，在实际发送标注或解释请求前直接读取配置，不依赖当前工作目录。更新密钥无需重启。缺失、格式错误或空值会在界面中提示，离线演示不需要密钥。Demo 保留密码模式密钥输入框：填写时优先使用界面密钥；留空时由核心读取本地 JSON。界面输入不会写入配置文件，也不读取 `DEEPSEEK_API_KEY` 环境变量。
+`ia_learning_core` 在实际发送标注或解释请求前解析密钥，不依赖当前工作目录。优先级从高到低：
+
+1. `annotate()` / `explain()` 的关键字参数 `key`（Demo 界面输入框，非空时优先）；
+2. 环境变量 `DEEPSEEK_API_KEY`；
+3. 环境变量 `IA_LEARNING_CONFIG_PATH` 指向的 JSON 文件；
+4. 用户配置目录 `%APPDATA%\IA\ia-learning-core\deepseek_api_key.json`；
+5. 仓库根目录 `deepseek_api_key.json`（源码检出时的历史位置，保留兼容）。
+
+查找顺序与实现见 `core.config_candidates()`。更新密钥无需重启。缺失、格式错误或空值会在界面中提示，离线演示不需要密钥。Demo 保留密码模式密钥输入框：填写时优先使用界面密钥；留空时由核心按上述顺序解析。界面输入不会写入配置文件，核心也不会把密钥写进请求体或界面历史。
 
 核心调用接口为 `annotate(source, prompt, model, key=None)` 和 `explain(number, prompt, model, key=None)`（`key` 为仅限关键字参数）；测试可通过 `LearningCore(config_path=...)` 指定临时配置，避免接触真实密钥。
 
@@ -108,9 +147,15 @@ $env:UV_PYTHON_INSTALL_DIR = "$PWD\.python"
 
 ## 提示词
 
-Demo 5.5.0 直接使用公共包 `prompts/annotation.txt` 和 `prompts/explanation.txt`，不扫描目录、不解析文件名版本、不自动选择兼容版本。加载失败会在编辑器中显示具体错误，不会回退到其他文件。
+Demo 5.5.0 通过 `ia_learning_core.prompt_path()` 取 `annotation.txt` 与 `explanation.txt`，不扫描目录、不解析文件名版本、不自动选择兼容版本。加载失败会在编辑器中显示具体错误，不会回退到其他文件。
 
-界面保留编辑、保存、重新加载和未保存修改提醒。请求使用当前编辑内容；保存更新固定文件，检测到外部修改时拒绝覆盖。重新加载有未保存修改时需要确认。提示词的修改历史由 Git 记录；提示词内容应与解析器协议保持一致。
+提示词位置按运行方式解析（`ia_learning_core.prompt_dir()`）：
+
+- `IA_PROMPT_DIR` 环境变量优先；
+- 源码检出（包目录旁有 `.git`）返回包内 `prompts/`，与 Git 版本历史一致；
+- 安装后的包（例如 wheel）返回用户配置目录 `%APPDATA%\IA\ia-learning-core\prompts\`，首次使用时从包内默认值复制，之后编辑的是用户副本。
+
+界面保留编辑、保存、重新加载和未保存修改提醒。请求使用当前编辑内容；保存更新当前提示词文件，检测到外部修改时拒绝覆盖。重新加载有未保存修改时需要确认。源码检出时的修改历史由 Git 记录；提示词内容应与解析器协议保持一致。
 
 ## 命名与 Git
 
@@ -120,7 +165,7 @@ Demo 5.5.0 直接使用公共包 `prompts/annotation.txt` 和 `prompts/explanati
 - 当前应用入口直接放在项目根目录，5.4.3 使用外部对照文件。后续版本通过 Git 提交与发布标签记录。
 - `.gitignore` 排除虚拟环境、缓存、密钥配置和运行数据；不忽略提示词。
 
-Git 分支为 `main`，已建立提交历史；尚未设置远程仓库。公共包尚未配置独立安装或 wheel 构建；未来打包时应包含两个提示词资源。
+Git 分支为 `main`，已建立提交历史；尚未设置远程仓库。公共包已是可安装包：`pyproject.toml` 声明包目录、包数据（两个提示词）与 `demo` / `faintocr` / `dev` 三个 extras，`pip install -e .` 后入口与测试直接 `import ia_learning_core`；构建的 wheel 中包含两个提示词资源。
 
 ## 验证
 
@@ -132,10 +177,18 @@ $env:FAINTOCR_REFERENCE_PATH = "D:\IA\OCR\FaintOCR\Codeia\5.x\Demo 5.4.3.py"
 
 两条检查，互不干扰：
 
-- 回归单测：`.venv\Scripts\python.exe -B -m unittest discover -s tests -v`，共 27 项检查（含 FaintOCR 路径/文件 I/O 的 7 项检查及接口兼容性的 6 项检查）：密钥文件加载、无效配置提示与密钥更新，固定提示词加载与保存保护、5.4.3 对照解析及请求协议、真实 Qt 离屏启动与绘制、6 个离线标注的选择、错误恢复，以及模拟标注/解释请求、缓存和失败处理。均已在 Python 3.14.10 + PySide6 6.12.0 下通过，不调用真实 API。
+- 回归单测：`.venv\Scripts\python.exe -B -m unittest discover -s tests -v`，共 38 项检查（含 FaintOCR 路径/文件 I/O 的 7 项、接口兼容性的 6 项、打包约束的 6 项）：密钥解析优先级（界面密钥、环境变量、用户配置、仓库根目录）与无效配置提示，固定提示词加载与保存保护、提示词目录覆盖与用户副本、5.4.3 对照解析及请求协议、真实 Qt 离屏启动与绘制、6 个离线标注的选择、错误恢复，模拟标注/解释请求、缓存和失败处理，以及 extras 与 requirements 文件的一致性、`core.py` 只依赖标准库、入口优先使用已安装包。均已在 Python 3.14.10 + PySide6-Essentials 6.12.0 下通过，不调用真实 API。
 - 环境自检：`.venv\Scripts\python.exe tests\check_rapidocr.py`，渲染中英文图片并真实调用 RapidOCR，首次运行需下载约 30 MB 模型。
+- 代码检查：`.venv\Scripts\ruff.exe check .`（规则见 `pyproject.toml`），CI 配置见 `.github/workflows/ci.yml`。
 
-在 DSH 沙箱内运行时，两个使用 `tempfile.TemporaryDirectory` 的单测用例会在清理阶段报 `PermissionError: [WinError 5]`（沙箱拒绝修改目录权限），与 Python 版本无关，3.12 同样复现；环境自检在本环境通过。
+在 DSH 沙箱内运行时，`tempfile` 以 0o700 创建的临时目录会失去工作区写权限，使用临时目录的用例会报 `PermissionError`；把 `TEMP`/`TMP` 指向工作区内目录即可运行：
+
+```powershell
+$env:TEMP = "$PWD\.tooling\tmp"; $env:TMP = "$env:TEMP"
+.venv\Scripts\python.exe -B -m unittest discover -s tests -v
+```
+
+测试已对临时目录清理使用 `ignore_cleanup_errors=True`，因此清理阶段不再报错；环境自检在本环境通过。
 
 ## 文件来源
 
@@ -151,10 +204,14 @@ $env:FAINTOCR_REFERENCE_PATH = "D:\IA\OCR\FaintOCR\Codeia\5.x\Demo 5.4.3.py"
 | `packages/ia_learning_core/prompts/annotation.txt` | `An_Demo 5.4.3_03.txt`，标注提示词，正文保持原样 |
 | `packages/ia_learning_core/prompts/explanation.txt` | `Ex_Demo 5.4.2_01.txt`，解释提示词，正文保持原样 |
 | `tests/test_demo.py` | 5.5.0 真实 Qt 与对照回归检查；提示词编辑器现位于 5.5.0 入口，已移除公共 `prompt_editor.py` |
-| `packages/ia_learning_core/__init__.py` | 整理时新增的包入口，导出提示词资源目录 |
-| `tests/test_credentials.py` | 本地密钥读取及错误处理的回归检查 |
-| `tests/test_prompt_files.py` | 固定提示词加载与保存逻辑的回归检查 |
-| `requirements.txt` | 本次新增，锁定 Python 3.14.10 + rapidocr 3.10.0 环境依赖 |
+| `packages/ia_learning_core/__init__.py` | 整理时新增的包入口；本轮加入提示词目录解析（`prompt_dir` / `prompt_path`） |
+| `tests/test_credentials.py` | 本地密钥读取及错误处理的回归检查；本轮补充密钥优先级用例 |
+| `tests/test_prompt_files.py` | 固定提示词加载与保存逻辑的回归检查；本轮补充提示词目录覆盖用例 |
+| `tests/test_packaging.py` | 本轮新增，检查 extras 与 requirements 一致、只依赖标准库、提示词随包分发 |
+| `pyproject.toml` | 本轮新增，包元数据、extras、包数据与 ruff 配置 |
+| `requirements.txt` | 完整环境快照；本轮改为 PyPI 规范包名并去掉 Qt 元包 / WebEngine / Pdf / Addons |
+| `requirements-demo.txt`、`requirements-faintocr.txt`、`requirements-dev.txt` | 本轮新增，按应用与开发用途拆分的最小依赖 |
+| `.github/workflows/ci.yml` | 本轮新增，ruff 与单元测试的持续集成 |
 | `scripts/check_rapidocr.py` | 本次新增，渲染测试图并调用引擎的环境自检（现位于 `tests/check_rapidocr.py`） |
 | `.gitignore`、各级 `README.md` | 整理时新增或更新；根文档原名为 `README.MD` |
 

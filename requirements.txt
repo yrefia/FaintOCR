@@ -1,5 +1,8 @@
-# 工作区 OCR 环境基线：Python 3.14.10 + rapidocr 3.10.0（onnxruntime 后端）
-# 生成方式：.venv\Scripts\python.exe -m pip freeze（升级依赖后请同步重新生成）
+# 工作区完整运行环境快照（OCR + Demo GUI），版本取自 .venv 的 pip freeze，
+# 包名统一为 PyPI 规范写法（例如 win32-setctime）。
+# 只要 Demo 时改用 requirements-demo.txt；只要 OCR 应用时改用 requirements-faintocr.txt。
+# Qt 只声明 Essentials：两个应用都只用 QtCore / QtGui / QtWidgets，
+# WebEngine、Pdf、Addons 与 PySide6 元包均不安装，因此不再出现在快照中。
 # 安装：.venv\Scripts\python.exe -m pip install -r requirements.txt
 certifi==2026.10.23
 charset-normalizer==3.5.2
@@ -7,33 +10,25 @@ colorama==0.4.6
 colorlog==6.12.0
 flatbuffers==25.12.19
 idna==3.20
+loguru==0.7.3
+mss==10.2.0
 numpy==2.5.4
 omegaconf==2.4.0
 onnxruntime==1.31.1
 opencv-python-headless==5.0.0.93
+orjson==3.13.0
 packaging==26.3
 pillow==13.0.0
 protobuf==7.36.2
 pyclipper==1.4.0
+PySide6-Essentials==6.12.0
 PyYAML==6.0.3
+RapidFuzz==3.14.6
 rapidocr==3.10.0
 requests==2.34.2
 shapely==2.2.0
+shiboken6==6.12.0
 six==1.17.0
 tqdm==4.70.1
 urllib3==2.8.0
-
-# Demo GUI dependencies
-PySide6==6.12.0
-PySide6_Essentials==6.12.0
-PySide6_Addons==6.12.0
-PySide6_WebEngine==6.12.0.140
-PySide6_Pdf==6.12.0.140
-shiboken6==6.12.0
-
-# FaintOCR 运行依赖
-loguru==0.7.3
-mss==10.2.0
-orjson==3.13.0
-RapidFuzz==3.14.6
 win32-setctime==1.2.1

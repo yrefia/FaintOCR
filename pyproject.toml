@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ia-learning-core"
+version = "0.1.0"
+description = "IA 共享学习核心：DeepSeek 请求/解析、固定提示词与可选 Qt 标注视图"
+readme = "packages/ia_learning_core/README.md"
+requires-python = ">=3.10"
+# 核心模块只用标准库；Qt 视图与两个应用各自通过 extras 声明依赖。
+dependencies = []
+
+[project.optional-dependencies]
+demo = ["PySide6-Essentials==6.12.0"]
+faintocr = [
+    "PySide6-Essentials==6.12.0",
+    "loguru==0.7.3",
+    "mss==10.2.0",
+    "onnxruntime==1.31.1",
+    "orjson==3.13.0",
+    "RapidFuzz==3.14.6",
+    "rapidocr==3.10.0",
+    "requests==2.34.2",
+    "win32-setctime==1.2.1",
+]
+dev = ["ruff==0.17.3"]
+
+[tool.setuptools]
+package-dir = { "" = "packages" }
+packages = ["ia_learning_core"]
+
+[tool.setuptools.package-data]
+ia_learning_core = ["prompts/*.txt"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+extend-exclude = [".venv", ".python", ".tooling", "projects/faintocr"]
+
+[tool.ruff.lint]
+# 先只启用能发现真实缺陷的规则：未使用导入/变量、未定义名称、语法级错误。
+select = ["F", "E9"]

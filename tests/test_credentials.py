@@ -1,5 +1,6 @@
 """Local credential loading without real API calls or personal credentials."""
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -14,18 +15,53 @@ from ia_learning_core import core
 
 class CredentialTests(unittest.TestCase):
     def setUp(self):
-        self.folder = tempfile.TemporaryDirectory()
+        self.folder = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.folder.cleanup)
         self.path = Path(self.folder.name) / 'deepseek_api_key.json'
 
-    def write(self, value):
-        self.path.write_text(json.dumps(value), encoding='utf-8-sig')
+    def write(self, value, path=None):
+        (path or self.path).write_text(json.dumps(value), encoding='utf-8-sig')
 
-    def test_default_path_is_repository_root(self):
+    def test_default_candidates_keep_repository_root_last(self):
         self.assertEqual(core.DEEPSEEK_CONFIG_PATH, ROOT / 'deepseek_api_key.json')
+        candidates = list(core.config_candidates())
+        self.assertEqual(candidates[0], core.USER_CONFIG_PATH)
+        self.assertEqual(candidates[-1], core.DEEPSEEK_CONFIG_PATH)
         self.write({'api_key': '  test-only-key  '})
-        with patch.object(core, 'DEEPSEEK_CONFIG_PATH', self.path):
+        with patch.object(core, 'USER_CONFIG_PATH', Path(self.folder.name) / 'absent.json'), \
+             patch.object(core, 'DEEPSEEK_CONFIG_PATH', self.path), \
+             patch.dict(os.environ, {'DEEPSEEK_API_KEY': '', 'IA_LEARNING_CONFIG_PATH': ''}):
             self.assertEqual(core.load_deepseek_api_key(), 'test-only-key')
+
+    def test_user_config_wins_over_repository_root(self):
+        user = Path(self.folder.name) / 'user' / 'deepseek_api_key.json'
+        user.parent.mkdir()
+        self.write({'api_key': 'user-key'}, user)
+        self.write({'api_key': 'repo-key'})
+        with patch.object(core, 'USER_CONFIG_PATH', user), \
+             patch.object(core, 'DEEPSEEK_CONFIG_PATH', self.path), \
+             patch.dict(os.environ, {'DEEPSEEK_API_KEY': '', 'IA_LEARNING_CONFIG_PATH': ''}):
+            self.assertEqual(core.load_deepseek_api_key(), 'user-key')
+
+    def test_environment_key_used_without_any_file(self):
+        absent = Path(self.folder.name) / 'absent'
+        with patch.object(core, 'USER_CONFIG_PATH', absent), \
+             patch.object(core, 'DEEPSEEK_CONFIG_PATH', absent), \
+             patch.dict(os.environ, {'DEEPSEEK_API_KEY': ' env-key ', 'IA_LEARNING_CONFIG_PATH': ''}):
+            self.assertEqual(core.load_deepseek_api_key(), 'env-key')
+            with patch.dict(os.environ, {'DEEPSEEK_API_KEY': 'bad key'}):
+                with self.assertRaisesRegex(ValueError, '无效字符'):
+                    core.load_deepseek_api_key()
+
+    def test_config_path_environment_variable_and_explicit_argument(self):
+        configured = Path(self.folder.name) / 'configured.json'
+        self.write({'api_key': 'configured-key'}, configured)
+        self.write({'api_key': 'explicit-key'})
+        with patch.object(core, 'USER_CONFIG_PATH', Path(self.folder.name) / 'absent.json'), \
+             patch.object(core, 'DEEPSEEK_CONFIG_PATH', configured), \
+             patch.dict(os.environ, {'DEEPSEEK_API_KEY': '', 'IA_LEARNING_CONFIG_PATH': str(configured)}):
+            self.assertEqual(core.load_deepseek_api_key(), 'configured-key')
+            self.assertEqual(core.load_deepseek_api_key(self.path), 'explicit-key')
 
     def test_missing_empty_or_wrong_type_is_actionable(self):
         with self.assertRaisesRegex(ValueError, '缺少'):
