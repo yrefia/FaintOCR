@@ -353,8 +353,25 @@ def resolve_items(value, text, issues=None):
     return resolved
 
 
+def api_error_message(body):
+    """The API's own error text from an error response body, or None."""
+    try:
+        error = json.loads(body).get('error')
+    except (ValueError, TypeError, AttributeError):
+        return None
+    message = error.get('message') if isinstance(error, dict) else error
+    return message.strip()[:200] if isinstance(message, str) and message.strip() else None
+
+
+def raise_api_error(body):
+    detail = api_error_message(body)
+    if detail:
+        raise ValueError(f'API 错误：{detail}')
+
+
 def response_json(body):
     """Decode actual JSON; no reconstruction of truncated or malformed content."""
+    raise_api_error(body)
     try:
         content = json.loads(body)["choices"][0]["message"]["content"]
         if not isinstance(content, str) or not content.strip():
@@ -422,7 +439,14 @@ def request_annotations(key, payload):
             return response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         hints = {400: "参数错误", 401: "密钥无效", 402: "余额不足", 429: "请求过于频繁", 503: "服务繁忙"}
-        raise ValueError(f"HTTP {exc.code}：{hints.get(exc.code, '请求失败')}") from exc
+        try:
+            detail = api_error_message(exc.read().decode("utf-8", "replace"))
+        except OSError:
+            detail = None
+        finally:
+            exc.close()
+        suffix = f"（{detail}）" if detail else ""
+        raise ValueError(f"HTTP {exc.code}：{hints.get(exc.code, '请求失败')}{suffix}") from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise ValueError("网络连接失败或超时，请重试。") from exc
 
@@ -557,8 +581,12 @@ class LearningCore:
             try:
                 body = self.transport(key, snapshot)
                 if kind == 'annotation':
-                    choice = json.loads(body)['choices'][0]
-                    raw = choice['message']['content']
+                    raise_api_error(body)
+                    try:
+                        choice = json.loads(body)['choices'][0]
+                        raw = choice['message']['content']
+                    except (KeyError, IndexError, TypeError, ValueError) as exc:
+                        raise ValueError('API 返回格式无效。') from exc
                     if not isinstance(raw, str):
                         raise ValueError('响应没有可读取的文本内容。')
                     data = (raw, choice.get('finish_reason'))
@@ -577,8 +605,9 @@ class LearningCore:
     def annotate(self, source, prompt, model, *, key=None):
         if self._closed:
             raise RuntimeError('会话已关闭。')
-        key = key.strip() if isinstance(key, str) and key.strip() else load_deepseek_api_key(self.config_path)
+        # 先校验输入，避免输入有误时却提示缺少密钥。
         payload = build_payload(source, prompt, model)
+        key = key.strip() if isinstance(key, str) and key.strip() else load_deepseek_api_key(self.config_path)
         signature = (source, prompt, model)
         if self.annotation_pending and signature == self._annotation_signature:
             return {'state':'pending', 'payload':None}
@@ -599,8 +628,8 @@ class LearningCore:
             return {'state':'cached', 'text':self.explanation_cache[token], 'payload':None}
         if token in self.explanation_pending:
             return {'state':'pending', 'text':'正在解释…', 'payload':None}
-        key = key.strip() if isinstance(key, str) and key.strip() else load_deepseek_api_key(self.config_path)
         payload = build_explanation_payload(self.document['source'], self.document['items'][number], prompt, model)
+        key = key.strip() if isinstance(key, str) and key.strip() else load_deepseek_api_key(self.config_path)
         self.explanation_pending.add(token)
         self._launch('explanation', token, key, payload)
         return {'state':'started', 'text':'正在解释…', 'payload':payload}

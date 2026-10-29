@@ -112,6 +112,8 @@ class DemoTests(unittest.TestCase):
         self.assertGreater(w.error_tree.topLevelItemCount(), 0)
         w.demo()
         self.assertEqual(len(w.items), 6)
+        # The text layout must not shadow QWidget.layout().
+        self.assertIsNone(w.subtitle.view.layout())
 
     def test_mock_annotation_explanation_cache_and_failure(self):
         w = self.window

@@ -27,7 +27,7 @@ class AnnotatedTextView(QWidget):
         self.enabled = set(LAYERS)
         self.hovered = None
         self.scroll = self.lift = 0
-        self.layout = None
+        self.text_layout = None
         self.rects = []
         self.content_height = 0
         self._blank_pressed = False
@@ -69,11 +69,11 @@ class AnnotatedTextView(QWidget):
         offsets = [0]
         for char in self.source:
             offsets.append(offsets[-1] + (2 if ord(char) > 0xffff else 1))
-        self.layout = QTextLayout(self.source.replace('\n', '\u2028'), self.text_font)
+        self.text_layout = QTextLayout(self.source.replace('\n', '\u2028'), self.text_font)
         option = QTextOption()
         option.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
         option.setAlignment(Qt.AlignHCenter)
-        self.layout.setTextOption(option)
+        self.text_layout.setTextOption(option)
         formats = []
         for item in self.items:
             if item['category'] == 'word' and 'word' in self.enabled:
@@ -84,17 +84,17 @@ class AnnotatedTextView(QWidget):
                     part.format.setFontWeight(QFont.Bold)
                     part.format.setForeground(QColor(*PALETTE["word"]))
                     formats.append(part)
-        self.layout.setFormats(formats)
-        self.layout.beginLayout()
+        self.text_layout.setFormats(formats)
+        self.text_layout.beginLayout()
         y = 0
         while True:
-            line = self.layout.createLine()
+            line = self.text_layout.createLine()
             if not line.isValid():
                 break
             line.setLineWidth(max(50, self.width()-62))
             line.setPosition(QPointF(0, y))
             y += line.height()
-        self.layout.endLayout()
+        self.text_layout.endLayout()
         self.content_height = y
         self.scroll = min(self.scroll, max(0, y-self.text_area().height()))
         self.rects = [[] for _ in self.items]
@@ -102,8 +102,8 @@ class AnnotatedTextView(QWidget):
             if item['category'] not in self.enabled:
                 continue
             for start, end in item['ranges']:
-                for n in range(self.layout.lineCount()):
-                    line = self.layout.lineAt(n)
+                for n in range(self.text_layout.lineCount()):
+                    line = self.text_layout.lineAt(n)
                     a, b = max(offsets[start], line.textStart()), min(offsets[end], line.textStart()+line.textLength())
                     if a < b:
                         x1, x2 = line.cursorToX(a)[0], line.cursorToX(b)[0]
@@ -139,7 +139,7 @@ class AnnotatedTextView(QWidget):
                     b = QPointF(rect.right(), rect.bottom()-1+shift)
                     p.setPen(QPen(QColor(*PALETTE["expression"]), 3, Qt.SolidLine, Qt.RoundCap))
                     p.drawLine(a,b)
-        if self.layout:
+        if self.text_layout:
             # Same shaped text/layout in both states; only the target clip translates.
             target = QPainterPath()
             if self.hovered is not None:
@@ -150,13 +150,13 @@ class AnnotatedTextView(QWidget):
             p.setPen(QColor(*PALETTE["original"]))
             p.save()
             p.setClipPath(all_text.subtracted(target), Qt.IntersectClip)
-            self.layout.draw(p, QPointF(31, self.text_top()-self.scroll))
+            self.text_layout.draw(p, QPointF(31, self.text_top()-self.scroll))
             p.restore()
             if not target.isEmpty():
                 p.save()
                 p.translate(0, -self.lift)
                 p.setClipPath(target, Qt.IntersectClip)
-                self.layout.draw(p, QPointF(31, self.text_top()-self.scroll))
+                self.text_layout.draw(p, QPointF(31, self.text_top()-self.scroll))
                 p.restore()
         p.end()
 
