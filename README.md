@@ -181,14 +181,7 @@ $env:FAINTOCR_REFERENCE_PATH = "D:\IA\OCR\FaintOCR\Codeia\5.x\Demo 5.4.3.py"
 - 环境自检：`.venv\Scripts\python.exe tests\check_rapidocr.py`，渲染中英文图片并真实调用 RapidOCR，首次运行需下载约 30 MB 模型。
 - 代码检查：`.venv\Scripts\ruff.exe check .`（规则见 `pyproject.toml`），CI 配置见 `.github/workflows/ci.yml`。
 
-在 DSH 沙箱内运行时，`tempfile` 以 0o700 创建的临时目录会失去工作区写权限，使用临时目录的用例会报 `PermissionError`；把 `TEMP`/`TMP` 指向工作区内目录即可运行：
-
-```powershell
-$env:TEMP = "$PWD\.tooling\tmp"; $env:TMP = "$env:TEMP"
-.venv\Scripts\python.exe -B -m unittest discover -s tests -v
-```
-
-测试已对临时目录清理使用 `ignore_cleanup_errors=True`，因此清理阶段不再报错；环境自检在本环境通过。
+在 DSH 沙箱等受限环境中，`tempfile` 以 0o700 创建的临时目录拿不到工作区写权限，涉及临时目录的用例会报 `PermissionError [WinError 5]`；这属于环境限制，请在普通终端或 CI 中运行单测。测试已对临时目录清理使用 `ignore_cleanup_errors=True`，清理阶段不会因此报错；环境自检在本环境通过。
 
 ## 文件来源
 

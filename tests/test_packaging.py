@@ -39,30 +39,37 @@ def project_metadata():
 
 
 class PackagingTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.metadata = project_metadata()
+        cls.declared = {
+            extra: {normalize(spec.partition('==')[0]): spec.partition('==')[2]
+                    for spec in cls.metadata['project']['optional-dependencies'][extra]}
+            for extra in DIRECT_REQUIREMENTS
+        }
+        cls.pins = {extra: parse_requirements(path) for extra, path in DIRECT_REQUIREMENTS.items()}
+        cls.snapshot = parse_requirements(ROOT / 'requirements.txt')
+        cls.files = {'requirements.txt': cls.snapshot}
+        cls.files.update({path.name: cls.pins[extra] for extra, path in DIRECT_REQUIREMENTS.items()})
+
     def test_optional_dependencies_match_requirements_files(self):
-        extras = project_metadata()['project']['optional-dependencies']
-        for extra, path in DIRECT_REQUIREMENTS.items():
-            declared = {}
-            for spec in extras[extra]:
-                name, _, version = spec.partition('==')
-                declared[normalize(name)] = version
-            self.assertEqual(declared, parse_requirements(path), extra)
+        for extra in DIRECT_REQUIREMENTS:
+            self.assertEqual(self.declared[extra], self.pins[extra], extra)
 
     def test_snapshot_covers_every_direct_dependency(self):
-        snapshot = parse_requirements(ROOT / 'requirements.txt')
-        for path in DIRECT_REQUIREMENTS.values():
-            for name, version in parse_requirements(path).items():
-                self.assertEqual(snapshot.get(name), version, f'{name} 与 requirements.txt 不一致')
+        for extra, pins in self.pins.items():
+            for name, version in pins.items():
+                self.assertEqual(self.snapshot.get(name), version, f'{name}（{extra}）与 requirements.txt 不一致')
 
     def test_unused_qt_modules_are_not_declared(self):
-        for path in (ROOT / 'requirements.txt', ROOT / 'requirements-demo.txt', ROOT / 'requirements-faintocr.txt'):
-            self.assertFalse(set(parse_requirements(path)) & UNUSED_QT_MODULES, path.name)
+        for name, pins in self.files.items():
+            self.assertFalse(set(pins) & UNUSED_QT_MODULES, name)
 
     def test_prompts_are_packaged_and_reachable(self):
-        data = project_metadata()
-        self.assertEqual(data['tool']['setuptools']['package-dir'][''], 'packages')
-        self.assertEqual(data['tool']['setuptools']['packages'], ['ia_learning_core'])
-        self.assertIn('prompts/*.txt', data['tool']['setuptools']['package-data']['ia_learning_core'])
+        tool = self.metadata['tool']['setuptools']
+        self.assertEqual(tool['package-dir'][''], 'packages')
+        self.assertEqual(tool['packages'], ['ia_learning_core'])
+        self.assertIn('prompts/*.txt', tool['package-data']['ia_learning_core'])
         for name in ('annotation.txt', 'explanation.txt'):
             self.assertTrue((PROMPT_ROOT / name).is_file())
             self.assertTrue(prompt_path(name).is_file())
