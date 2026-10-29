@@ -38,6 +38,10 @@ target-version = "py310"
 line-length = 120
 extend-exclude = [".venv", ".python", ".tooling", "projects/faintocr"]
 
+[tool.ruff.format]
+# 保留现有单引号写法；目前只对 projects/faintocr-demo 执行格式化，core 需与 5.4.3 对照，不整体重排。
+quote-style = "preserve"
+
 [tool.ruff.lint]
 # 先只启用能发现真实缺陷的规则：未使用导入/变量、未定义名称、语法级错误。
 select = ["F", "E9"]

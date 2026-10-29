@@ -1,14 +1,14 @@
 """Embeddable Qt annotation view. No API calls, prompts or application window policy."""
-import time
-from PySide6.QtCore import Qt, QRectF, QPointF, QTimer, Signal
+from PySide6.QtCore import Qt, QRectF, QPointF, QEasingCurve, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QTextLayout, QTextOption, QTextCharFormat, QPainterPath
 from PySide6.QtWidgets import QWidget
 
-from .core import utf16_offsets
+from .core import LAYER_KEYS, utf16_offsets
 
-PHRASE_UNDERLINE_COLOR = '#7BDCE8'
-PALETTE = {'original':(245,246,250,255), 'syntax':(154,132,255,51), 'expression':(123,220,232,255), 'word':(245,216,166,255)}
-LAYERS = {'word', 'phrase', 'grammar'}
+PALETTE = {'original':(245,246,250,255), 'grammar':(154,132,255,51), 'phrase':(123,220,232,255), 'word':(245,216,166,255)}
+LAYERS = set(LAYER_KEYS.values())
+# 背景先画、下划线后画，与 API 返回的条目顺序无关。
+PAINT_ORDER = {'grammar': 0, 'phrase': 1, 'word': 2}
 
 def rgba(value, alpha=255):
     result = QColor(value)
@@ -31,9 +31,13 @@ class AnnotatedTextView(QWidget):
         self.text_layout = None
         self.rects = []
         self.content_height = 0
-        self.timer = QTimer(self)
-        self.timer.setInterval(16)
-        self.timer.timeout.connect(self.animate)
+        # 悬停条目在 140ms 内上浮 1px（OutCubic）。
+        self.lift_animation = QVariantAnimation(self)
+        self.lift_animation.setStartValue(0.0)
+        self.lift_animation.setEndValue(1.0)
+        self.lift_animation.setDuration(140)
+        self.lift_animation.setEasingCurve(QEasingCurve.OutCubic)
+        self.lift_animation.valueChanged.connect(self._set_lift)
         self.text_font = QFont('Microsoft YaHei UI', 14, QFont.Medium)
         self.relayout()
 
@@ -41,7 +45,7 @@ class AnnotatedTextView(QWidget):
         self.source, self.items = source, items
         self.enabled = set(LAYERS) if enabled is None else set(enabled)
         self.hovered = None
-        self.timer.stop()
+        self.lift_animation.stop()
         self.lift = self.scroll = 0
         self.relayout()
         self.update()
@@ -65,7 +69,7 @@ class AnnotatedTextView(QWidget):
     def resizeEvent(self, event):
         self.hovered = None
         self.lift = 0
-        self.timer.stop()
+        self.lift_animation.stop()
         self.relayout()
         super().resizeEvent(event)
 
@@ -85,7 +89,7 @@ class AnnotatedTextView(QWidget):
                     part.start, part.length = offsets[start], offsets[end]-offsets[start]
                     part.format = QTextCharFormat()
                     part.format.setFontWeight(QFont.Bold)
-                    part.format.setForeground(QColor(*PALETTE["word"]))
+                    part.format.setForeground(QColor(*PALETTE['word']))
                     formats.append(part)
         self.text_layout.setFormats(formats)
         self.text_layout.beginLayout()
@@ -127,20 +131,20 @@ class AnnotatedTextView(QWidget):
         viewport = self.text_area().adjusted(-6, -4, 6, 6)
         p.setClipRect(viewport)
         # Backgrounds always precede underlines, regardless of API item order.
-        for number, item in sorted(enumerate(self.items), key=lambda pair: {"grammar":0,"phrase":1,"word":2}[pair[1]["category"]]):
+        for number, item in sorted(enumerate(self.items), key=lambda pair: PAINT_ORDER[pair[1]['category']]):
             category = item['category']
             for original in self.rects[number]:
                 rect = self.displayed_rect(original)
                 shift = -self.lift if self.hovered == number else 0
                 if category == 'grammar':
                     block = rect.adjusted(-3, -2, 3, 2).translated(0, shift)
-                    p.setBrush(QColor(*PALETTE["syntax"]))
+                    p.setBrush(QColor(*PALETTE['grammar']))
                     p.setPen(QPen(rgba('#9A84FF', 150), 1) if self.hovered == number else QPen(Qt.NoPen))
                     p.drawRoundedRect(block, 7, 7)
                 elif category == 'phrase':
                     a = QPointF(rect.left(), rect.bottom()-1+shift)
                     b = QPointF(rect.right(), rect.bottom()-1+shift)
-                    p.setPen(QPen(QColor(*PALETTE["expression"]), 3, Qt.SolidLine, Qt.RoundCap))
+                    p.setPen(QPen(QColor(*PALETTE['phrase']), 3, Qt.SolidLine, Qt.RoundCap))
                     p.drawLine(a,b)
         if self.text_layout:
             # Same shaped text/layout in both states; only the target clip translates.
@@ -150,7 +154,7 @@ class AnnotatedTextView(QWidget):
                     target.addRect(self.displayed_rect(rect))
             all_text = QPainterPath()
             all_text.addRect(viewport)
-            p.setPen(QColor(*PALETTE["original"]))
+            p.setPen(QColor(*PALETTE['original']))
             p.save()
             p.setClipPath(all_text.subtracted(target), Qt.IntersectClip)
             self.text_layout.draw(p, QPointF(self.MARGIN_X, self.text_top()-self.scroll))
@@ -181,22 +185,21 @@ class AnnotatedTextView(QWidget):
     def focus(self, number):
         if number != self.hovered:
             self.hovered, self.lift = number, 0
-            self.started = time.monotonic()
-            self.timer.start() if number is not None else self.timer.stop()
+            self.lift_animation.stop()
+            if number is not None:
+                self.lift_animation.start()
             self.update()
         self.setCursor(Qt.PointingHandCursor if number is not None else Qt.ArrowCursor)
 
 
-    def animate(self):
-        progress = min(1, (time.monotonic()-self.started)/.14)
-        self.lift = 1-(1-progress)**3
-        if progress >= 1:
-            self.timer.stop()
+    def _set_lift(self, value):
+        self.lift = value
         self.update()
 
 
     def leaveEvent(self, event):
         self.focus(None)
+        super().leaveEvent(event)
 
 
     def wheelEvent(self, event):

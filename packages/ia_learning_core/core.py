@@ -8,6 +8,7 @@ import queue
 import re
 import threading
 import time
+from typing import TypedDict
 import urllib.error
 import urllib.request
 
@@ -118,6 +119,8 @@ TAG_CATEGORIES = {
           'Multiword Verbs', 'Fixed Phrases', 'Collocations'},
     'S': {'Subjunctive', 'Subjunctive / Irrealis', 'Emphatic Constructions', 'Inversion', 'Ellipsis', 'Fronting', 'Parentheticals'},
 }
+# 标签字母到层级键（W 单词、E 表达、S 句法）；CATEGORIES 与 view 都按层级键取用。
+LAYER_KEYS = {'W': 'word', 'E': 'phrase', 'S': 'grammar'}
 TAG_RE = re.compile(r'<(/?)#([WES][1-9][0-9]*)>')
 
 
@@ -243,7 +246,7 @@ def decode_best_effort(raw):
     return None,{},[initial,notice('没有可恢复的完整 JSON 标注，显示本次原文。',0,len(raw))]
 
 
-def resolve_items(value, text, issues=None):
+def resolve_items(value, text, issues=None) -> 'list[Item]':
     """Recover independently locatable annotations; never invent missing boundaries."""
     issues = issues if issues is not None else []
     def warn(message, path=(), position=None, identity=''):
@@ -359,7 +362,7 @@ def resolve_items(value, text, issues=None):
             ranges=[(offset+a,offset+b) for a,b in local]
             annotation=dict(record,sentence_index=index+1,source=source,
                             spans=[{'text':text[a:b],'start':a,'end':b} for a,b in ranges])
-            resolved.append({'category':{'W':'word','E':'phrase','S':'grammar'}[layer],
+            resolved.append({'category':LAYER_KEYS[layer],
                              'base':[category],'unit':canonical,'ranges':ranges,'subtype':category,'annotation':annotation,'json_path':rp})
     if text[cursor:].strip(): warn('返回句子未覆盖原文末尾，可用标注已保留。',('sentences',))
     return resolved
@@ -458,7 +461,26 @@ def request_annotations(key, payload):
 
 
 # Public API v1: plain Python data, explicit host-provided prompt paths.
-def parse_annotation(source, raw):
+class Item(TypedDict):
+    """One resolved annotation; ranges are Python indices into the full source text."""
+    category: str  # LAYER_KEYS 的值
+    base: list[str]
+    unit: str  # canonical
+    ranges: list[tuple[int, int]]
+    subtype: str  # 属性记录里的 category 子类
+    annotation: dict  # 原始属性记录，另附 sentence_index / source / spans
+    json_path: tuple
+
+
+class Document(TypedDict):
+    source: str
+    items: list[Item]
+    warnings: list[AnnotationError]
+    raw: str
+    locations: dict[tuple, tuple[int, int]]  # JSON 值路径 -> 返回文本中的 [start, end)
+
+
+def parse_annotation(source, raw) -> Document:
     value, locations, warnings = decode_best_effort(raw)
     items = resolve_items(value, source, warnings) if value is not None else []
     return {'source': source, 'items': items, 'warnings': warnings,

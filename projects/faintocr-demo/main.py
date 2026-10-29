@@ -1,4 +1,5 @@
 """Learning annotation application entry point."""
+
 from pathlib import Path
 import importlib.util
 import sys
@@ -10,44 +11,48 @@ if importlib.util.find_spec('ia_learning_core') is None:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'packages'))
 from ia_learning_core import core, prompt_path
 from ia_learning_core.view import AnnotatedTextView, rgba
-from ia_learning_core.core import (CATEGORIES, AnnotationError, PromptFile,
-    compose_annotation_payload, compose_explanation_payload, format_request, utf16_offsets)
+from ia_learning_core.core import (
+    CATEGORIES,
+    AnnotationError,
+    PromptFile,
+    compose_annotation_payload,
+    compose_explanation_payload,
+    format_request,
+    utf16_offsets,
+)
+
+# runpy 与测试不会把入口所在目录加入 sys.path，示例数据模块需要显式加入。
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from demo_data import SAMPLE, DEMO, DEMO_EXPLANATIONS
 from PySide6.QtCore import Qt, QRectF, QTimer, Signal
-from PySide6.QtGui import (QColor, QFont, QPainter, QPen, QLinearGradient, QTextCursor)
-from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-    QPlainTextEdit, QLineEdit, QPushButton, QLabel, QSplitter, QTreeWidget,
-    QTreeWidgetItem, QTextEdit, QTabWidget, QCheckBox, QComboBox, QTextBrowser, QMessageBox)
+from PySide6.QtGui import QColor, QFont, QPainter, QPen, QLinearGradient, QTextCursor
+from PySide6.QtWidgets import (
+    QApplication,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPlainTextEdit,
+    QLineEdit,
+    QPushButton,
+    QLabel,
+    QSplitter,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QTextEdit,
+    QTabWidget,
+    QCheckBox,
+    QComboBox,
+    QTextBrowser,
+    QMessageBox,
+)
 
 DEMO_TITLE = 'FaintOCR Demo 5.5.0'
-
-# User-supplied annotation fixture; explanatory text is local demo data only.
-SAMPLE = 'Only by calling our cherished assumptions into question can we approach the truth with intellectual humility.'
-DEMO = {'sentences': [{'source': 'Only by calling our cherished assumptions into question can we approach the truth '
-                          'with intellectual humility.',
-                'annotated': '<#S1>Only by <#E1>calling our <#W1>cherished</#W1> <#W2>assumptions</#W2> into '
-                             'question</#E1> can we</#S1> approach the truth with <#W3>intellectual</#W3> '
-                             '<#W4>humility</#W4>.',
-                'annotations': [{'id': 'S1',
-                                 'category': 'Inversion',
-                                 'canonical': 'Only <Adverbial> <Auxiliary> <Subject>'},
-                                {'id': 'E1',
-                                 'category': 'Idioms & Conventional Expressions',
-                                 'canonical': 'call <Object> into question'},
-                                {'id': 'W1', 'category': 'Beyond Top 2000', 'canonical': 'cherish'},
-                                {'id': 'W2', 'category': 'Beyond Top 2000', 'canonical': 'assumption'},
-                                {'id': 'W3', 'category': 'Beyond Top 2000', 'canonical': 'intellectual'},
-                                {'id': 'W4', 'category': 'Beyond Top 2000', 'canonical': 'humility'}]}]}
-DEMO_EXPLANATIONS = ('Only by 引导的状语置于句首，主句使用 can we approach 部分倒装，强调“只有通过……才能……”。',
- 'call <Object> into question 表示“质疑……”。这里的 calling 是动名词形式，中间槽位 our cherished assumptions 指我们珍视的假设。',
- 'cherished 源自 cherish，在此作定语，表示“珍视的、深信不疑的”，修饰 assumptions。',
- 'assumptions 是 assumption 的复数，意为“假设、未经证实而接受的看法”。这里指我们习以为常的前提。',
- 'intellectual 在此作形容词，与 humility 搭配，指对知识、推理和自身认识局限的态度。',
- 'humility 意为“谦逊”。intellectual humility 指承认自身认识可能有局限、愿意修正观点的态度。')
-
 
 
 class SubtitleWindow(QWidget):
     """Demo-owned floating shell. Shared view owns only annotated text rendering."""
+
     selected = Signal(int)
     visibility_changed = Signal(bool)
 
@@ -55,14 +60,16 @@ class SubtitleWindow(QWidget):
         super().__init__(None, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setWindowTitle(f'{DEMO_TITLE} · 字幕')
-        self.resize(980,180)
+        self.resize(980, 180)
         self.info_height = 220
         self.view = AnnotatedTextView(self)
         self.view.annotation_clicked.connect(self.selected.emit)
         self.info = QTextBrowser()
         self.info.setOpenLinks(False)
-        self.info.setFont(QFont('Microsoft YaHei UI',11))
-        self.info.setStyleSheet('QTextBrowser { background: transparent; color: #F5F6FA; border: 0; border-top: 1px solid rgba(230,220,255,60); padding-top: 10px; }')
+        self.info.setFont(QFont('Microsoft YaHei UI', 11))
+        self.info.setStyleSheet(
+            'QTextBrowser { background: transparent; color: #F5F6FA; border: 0; border-top: 1px solid rgba(230,220,255,60); padding-top: 10px; }'
+        )
         # 解释区与字幕文字左右对齐，底部给圆角边框留出位置。
         self.info_panel = QWidget()
         panel = QVBoxLayout(self.info_panel)
@@ -77,59 +84,70 @@ class SubtitleWindow(QWidget):
         layout.addWidget(self.info_panel)
 
     @property
-    def source(self): return self.view.source
+    def source(self):
+        return self.view.source
 
     @property
-    def items(self): return self.view.items
+    def items(self):
+        return self.view.items
 
-    def showEvent(self,event):
+    def showEvent(self, event):
         super().showEvent(event)
         self.visibility_changed.emit(True)
 
-    def hideEvent(self,event):
+    def hideEvent(self, event):
         super().hideEvent(event)
         self.visibility_changed.emit(False)
 
-    def set_content(self,source,items,enabled=None):
-        self.info.clear();self.info_panel.hide()
-        self.view.set_content(source,items,enabled)
-        screen=self.screen().availableGeometry()
-        self.resize(self.width(),max(self.height(),min(max(180,self.view.preferred_height()),int(screen.height()*.6))))
+    def set_content(self, source, items, enabled=None):
+        self.info.clear()
+        self.info_panel.hide()
+        self.view.set_content(source, items, enabled)
+        screen = self.screen().availableGeometry()
+        self.resize(
+            self.width(), max(self.height(), min(max(180, self.view.preferred_height()), int(screen.height() * 0.6)))
+        )
         self.update()
 
-    def show_explanation(self,number,text):
-        item=self.items[number]
+    def show_explanation(self, number, text):
+        item = self.items[number]
         if self.info_panel.isHidden():
-            cap=self.screen().availableGeometry().height()-40
-            self.resize(self.width(),max(self.height(),min(max(180,self.view.preferred_height())+self.info_height,cap)))
-        self.info.setPlainText(f"{CATEGORIES[item['category']][0]} · {item['subtype'] + ' · ' if item['subtype'] else ''}{item['unit']}\n{text}")
+            cap = self.screen().availableGeometry().height() - 40
+            self.resize(
+                self.width(), max(self.height(), min(max(180, self.view.preferred_height()) + self.info_height, cap))
+            )
+        self.info.setPlainText(
+            f"{CATEGORIES[item['category']][0]} · {item['subtype'] + ' · ' if item['subtype'] else ''}{item['unit']}\n{text}"
+        )
         self.info.verticalScrollBar().setValue(0)
         self.info_panel.show()
 
-    def closeEvent(self,event):
+    def closeEvent(self, event):
         self.view.focus(None)
         super().closeEvent(event)
 
-    def paintEvent(self,event):
-        p=QPainter(self)
+    def paintEvent(self, event):
+        p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        body=QRectF(12,10,self.width()-24,self.height()-24)
-        p.setOpacity(.8)
+        body = QRectF(12, 10, self.width() - 24, self.height() - 24)
+        p.setOpacity(0.8)
         p.setPen(Qt.NoPen)
-        p.setBrush(rgba('#060815',28))
-        p.drawRoundedRect(body.adjusted(-1,2,1,4),23,23)
-        gradient=QLinearGradient(body.topLeft(),body.bottomRight())
-        gradient.setColorAt(0,rgba('#20222d',248))
-        gradient.setColorAt(1,rgba('#141621',248))
+        p.setBrush(rgba('#060815', 28))
+        p.drawRoundedRect(body.adjusted(-1, 2, 1, 4), 23, 23)
+        gradient = QLinearGradient(body.topLeft(), body.bottomRight())
+        gradient.setColorAt(0, rgba('#20222d', 248))
+        gradient.setColorAt(1, rgba('#141621', 248))
         p.setBrush(gradient)
-        p.setPen(QPen(rgba('#ffffff',28),1))
-        p.drawRoundedRect(body,22,22)
+        p.setPen(QPen(rgba('#ffffff', 28), 1))
+        p.drawRoundedRect(body, 22, 22)
         p.end()
 
 
 def confirm_discard(parent, text):
     """True when the user agrees to drop unsaved prompt edits."""
-    answer = QMessageBox.question(parent, '未保存提示词', text, QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Cancel)
+    answer = QMessageBox.question(
+        parent, '未保存提示词', text, QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Cancel
+    )
     return answer == QMessageBox.Discard
 
 
@@ -233,8 +251,18 @@ class AnnotationWindow(QWidget):
         self.submit_button = QPushButton('标注学习元素')
         self.demo_button = QPushButton('离线演示')
         self.subtitle_button = QPushButton('显示字幕悬浮窗')
-        self.subtitle.visibility_changed.connect(lambda visible: self.subtitle_button.setText('关闭字幕悬浮窗' if visible else '显示字幕悬浮窗'))
-        for widget in (QLabel('DeepSeek API Key'), self.key, QLabel('模型'), self.model, self.submit_button, self.demo_button, self.subtitle_button):
+        self.subtitle.visibility_changed.connect(
+            lambda visible: self.subtitle_button.setText('关闭字幕悬浮窗' if visible else '显示字幕悬浮窗')
+        )
+        for widget in (
+            QLabel('DeepSeek API Key'),
+            self.key,
+            QLabel('模型'),
+            self.model,
+            self.submit_button,
+            self.demo_button,
+            self.subtitle_button,
+        ):
             top.addWidget(widget)
         root.addLayout(top)
         splitter = QSplitter()
@@ -313,7 +341,7 @@ class AnnotationWindow(QWidget):
         self.raw.textChanged.connect(self.clear_errors)
         side.addWidget(self.error_tree)
         splitter.addWidget(panel)
-        splitter.setSizes([420,700])
+        splitter.setSizes([420, 700])
         root.addWidget(splitter)
         self.status = QLabel('先标注，点击后按需解释；同一文本内缓存解释。密钥不落盘。')
         self.status.setWordWrap(True)
@@ -337,25 +365,31 @@ class AnnotationWindow(QWidget):
         self.refresh_request_previews()
 
     def refresh_request_previews(self):
-        first = compose_annotation_payload(self.english.toPlainText(), self.prompt.toPlainText(), self.model.currentText())
-        self.annotation_preview.setPlainText('待发送预览（未通过输入校验时不会发送）。\n\n'+format_request(first))
+        first = compose_annotation_payload(
+            self.english.toPlainText(), self.prompt.toPlainText(), self.model.currentText()
+        )
+        self.annotation_preview.setPlainText('待发送预览（未通过输入校验时不会发送）。\n\n' + format_request(first))
         number = self.preview_item.currentData()
         item = self.items[number] if number is not None and number < len(self.items) else None
-        second = compose_explanation_payload(self.source, item, self.explanation_prompt.toPlainText(), self.model.currentText())
-        note = '仅预览；命中缓存或离线演示时不会发送。' if item else '未选标注，annotation 为占位 null；此状态不会发送。'
-        self.explanation_preview.setPlainText(note+'\n\n'+format_request(second))
+        second = compose_explanation_payload(
+            self.source, item, self.explanation_prompt.toPlainText(), self.model.currentText()
+        )
+        note = (
+            '仅预览；命中缓存或离线演示时不会发送。' if item else '未选标注，annotation 为占位 null；此状态不会发送。'
+        )
+        self.explanation_preview.setPlainText(note + '\n\n' + format_request(second))
 
     def record_request(self, layer, payload):
         snapshot = json.loads(json.dumps(payload, ensure_ascii=False))
-        self.request_history.append({'layer':layer, 'payload':snapshot})
+        self.request_history.append({'layer': layer, 'payload': snapshot})
         self.history_selector.addItem(f"{len(self.request_history)} · {layer} · {time.strftime('%H:%M:%S')}")
-        self.history_selector.setCurrentIndex(len(self.request_history)-1)
-        self.show_history(len(self.request_history)-1)
+        self.history_selector.setCurrentIndex(len(self.request_history) - 1)
+        self.show_history(len(self.request_history) - 1)
 
     def show_history(self, index):
         if 0 <= index < len(self.request_history):
             record = self.request_history[index]
-            self.history_view.setPlainText(record['layer']+' · 发送快照\n\n'+format_request(record['payload']))
+            self.history_view.setPlainText(record['layer'] + ' · 发送快照\n\n' + format_request(record['payload']))
 
     def toggle_subtitle(self):
         if self.subtitle.isVisible():
@@ -382,50 +416,48 @@ class AnnotationWindow(QWidget):
         self.preview_item.clear()
         self.preview_item.addItem('未选择标注', None)
         for number, item in enumerate(self.items):
-            self.preview_item.addItem((item['subtype']+' · ' if item['subtype'] else '')+item['unit'], number)
+            self.preview_item.addItem((item['subtype'] + ' · ' if item['subtype'] else '') + item['unit'], number)
         self.preview_item.blockSignals(False)
         self.refresh_request_previews()
-
-    def reset_explanations(self, offline=False):
-        self.core.reset()
-        self.offline = offline
 
     def display_explanation(self, number, text, reveal=True):
         self.subtitle.show_explanation(number, text)
         if reveal:
             self.show_subtitle()
         item = self.items[number]
-        quotes = ' / '.join(self.source[a:b] for a,b in item['ranges'])
-        self.details.setText(f"{item['subtype'] + ' · ' if item['subtype'] else ''}{item['unit']}\n原文：{quotes}\n{text}")
+        quotes = ' / '.join(self.source[a:b] for a, b in item['ranges'])
+        self.details.setText(
+            f"{item['subtype'] + ' · ' if item['subtype'] else ''}{item['unit']}\n原文：{quotes}\n{text}"
+        )
 
     def select_item(self, number):
         self.preview_item.setCurrentIndex(self.preview_item.findData(number))
         self.refresh_request_previews()
         for i in range(self.tree.topLevelItemCount()):
-            entry=self.tree.topLevelItem(i)
-            if entry.data(0,Qt.UserRole)==number: self.tree.setCurrentItem(entry)
+            entry = self.tree.topLevelItem(i)
+            if entry.data(0, Qt.UserRole) == number:
+                self.tree.setCurrentItem(entry)
         if self.offline:
-            self.display_explanation(number,DEMO_EXPLANATIONS[number])
+            self.display_explanation(number, DEMO_EXPLANATIONS[number])
             return
         try:
-            result=self.core.explain(number,self.explanation_prompt.toPlainText(),self.model.currentText(),key=self.key.text())
+            result = self.core.explain(
+                number, self.explanation_prompt.toPlainText(), self.model.currentText(), key=self.key.text()
+            )
         except ValueError as exc:
-            self.display_explanation(number,str(exc))
+            self.display_explanation(number, str(exc))
             return
-        self.display_explanation(number,result['text'])
+        self.display_explanation(number, result['text'])
         if result['payload'] is not None:
-            self.record_request('第二层 · 解释',result['payload'])
-
-
-
-
+            self.record_request('第二层 · 解释', result['payload'])
 
     def demo(self):
-        if self.busy: return
+        if self.busy:
+            return
         self.english.setPlainText(SAMPLE)
-        self.raw.setPlainText(json.dumps(DEMO,ensure_ascii=False,indent=2))
-        result=self.core.apply_json(SAMPLE,self.raw.toPlainText())
-        self.offline=True
+        self.raw.setPlainText(json.dumps(DEMO, ensure_ascii=False, indent=2))
+        result = self.core.apply_json(SAMPLE, self.raw.toPlainText())
+        self.offline = True
         self.show_document(result)
         self.status.setText('离线演示 · 无 API 请求')
 
@@ -439,13 +471,13 @@ class AnnotationWindow(QWidget):
 
     def show_json_error(self, error):
         self.clear_errors()
-        content=self.raw.toPlainText()
-        locations=self.rendered_locations if content==self.rendered_raw else core.decode_best_effort(content)[1]
-        entries=core.warning_locations(content,locations,getattr(error,'errors',[error]))
-        for label,message,start,end in entries:
-            entry=QTreeWidgetItem([label,message])
-            entry.setToolTip(1,message)
-            entry.setData(0,Qt.UserRole,(start,end))
+        content = self.raw.toPlainText()
+        locations = self.rendered_locations if content == self.rendered_raw else core.decode_best_effort(content)[1]
+        entries = core.warning_locations(content, locations, getattr(error, 'errors', [error]))
+        for label, message, start, end in entries:
+            entry = QTreeWidgetItem([label, message])
+            entry.setToolTip(1, message)
+            entry.setData(0, Qt.UserRole, (start, end))
             self.error_tree.addTopLevelItem(entry)
         self.error_tree.setVisible(bool(entries))
         if entries:
@@ -453,91 +485,112 @@ class AnnotationWindow(QWidget):
             self.navigate_error(self.error_tree.topLevelItem(0))
 
     def apply_json(self):
-        if self.busy: return
-        self.apply_result(self.raw.toPlainText(),self.english.toPlainText(),'本地重新渲染 · 无 API 请求')
+        if self.busy:
+            return
+        self.apply_result(self.raw.toPlainText(), self.english.toPlainText(), '本地重新渲染 · 无 API 请求')
 
     def apply_result(self, raw, source, label):
-        result=self.core.apply_json(source,raw)
-        self.offline=False
-        self.show_document(result,label)
+        result = self.core.apply_json(source, raw)
+        self.offline = False
+        self.show_document(result, label)
 
     def show_document(self, result, label='解析完成'):
-        self.source,self.items=result['source'],result['items']
-        self.rendered_raw,self.rendered_locations=result['raw'],result['locations']
-        self.render();self.show_subtitle()
+        self.source, self.items = result['source'], result['items']
+        self.rendered_raw, self.rendered_locations = result['raw'], result['locations']
+        self.render()
+        self.show_subtitle()
         self.clear_errors()
-        issues=result['warnings']
+        issues = result['warnings']
         if issues:
-            notice=AnnotationError('解析提醒');notice.errors=issues
+            notice = AnnotationError('解析提醒')
+            notice.errors = issues
             self.show_json_error(notice)
         self.status.setToolTip('\n'.join(str(i) for i in issues))
-        self.status.setText(f'{label} · {len(self.items)} 个可用标注 · {len(issues)} 条提醒'
-                            + ('；已显示本次原文。' if not self.items else ''))
+        self.status.setText(
+            f'{label} · {len(self.items)} 个可用标注 · {len(issues)} 条提醒'
+            + ('；已显示本次原文。' if not self.items else '')
+        )
 
     def highlight_item_json(self, number):
-        if not isinstance(number,int) or not 0 <= number < len(self.items): return
-        raw=self.raw.toPlainText()
+        if not isinstance(number, int) or not 0 <= number < len(self.items):
+            return
+        raw = self.raw.toPlainText()
         if raw != self.rendered_raw:
             self.status.setText('提醒：返回 JSON 已编辑，请先应用后再定位元素。')
             return
-        item=self.items[number]; annotation=item['annotation']
-        ranges=core.item_json_ranges(item,raw,self.rendered_locations)
-        selections=[]
-        offsets=utf16_offsets(raw)
-        for start,end in ranges:
-            selection=QTextEdit.ExtraSelection()
-            selection.cursor=range_cursor(self.raw,offsets,start,end)
+        item = self.items[number]
+        annotation = item['annotation']
+        ranges = core.item_json_ranges(item, raw, self.rendered_locations)
+        selections = []
+        offsets = utf16_offsets(raw)
+        for start, end in ranges:
+            selection = QTextEdit.ExtraSelection()
+            selection.cursor = range_cursor(self.raw, offsets, start, end)
             selection.format.setBackground(QColor('#665128'))
             selection.format.setForeground(QColor('#fff1bc'))
             selections.append(selection)
         self.raw.setExtraSelections(selections)
         if selections:
             self.raw.setTextCursor(selections[0].cursor)
-            self.raw.setFocus();self.raw.ensureCursorVisible()
-        self.details.setText(f"JSON 定位 · 第 {annotation['sentence_index']} 句 · {annotation['id']} · {item['unit']}\n已标出属性记录与 {len(ranges)-1} 个范围片段；点击字幕标注可查看解释。")
+            self.raw.setFocus()
+            self.raw.ensureCursorVisible()
+        self.details.setText(
+            f"JSON 定位 · 第 {annotation['sentence_index']} 句 · {annotation['id']} · {item['unit']}\n已标出属性记录与 {len(ranges) - 1} 个范围片段；点击字幕标注可查看解释。"
+        )
 
     def set_busy(self, busy):
         self.busy = busy
-        for widget in (self.submit_button, self.demo_button, self.prompt, self.english, self.raw, self.apply_json_button):
+        for widget in (
+            self.submit_button,
+            self.demo_button,
+            self.prompt,
+            self.english,
+            self.raw,
+            self.apply_json_button,
+        ):
             widget.setEnabled(not busy)
 
     def submit(self):
-        if self.busy: return
+        if self.busy:
+            return
         try:
-            result=self.core.annotate(self.english.toPlainText(),self.prompt.toPlainText(),self.model.currentText(),key=self.key.text())
+            result = self.core.annotate(
+                self.english.toPlainText(), self.prompt.toPlainText(), self.model.currentText(), key=self.key.text()
+            )
         except ValueError as exc:
-            self.status.setText(str(exc));return
-        self.offline=False
+            self.status.setText(str(exc))
+            return
+        self.offline = False
         self.raw.clear()
         self.show_document(self.core.document)
         self.set_busy(True)
         self.status.setText('正在标注…')
         if result['payload'] is not None:
-            self.record_request('第一层 · 标注',result['payload'])
-
-
+            self.record_request('第一层 · 标注', result['payload'])
 
     def poll(self):
         for event in self.core.poll():
-            if event['kind']=='explanation':
+            if event['kind'] == 'explanation':
                 if event['selected']:
-                    self.display_explanation(event['token'][1],event['data'],reveal=False)
+                    self.display_explanation(event['token'][1], event['data'], reveal=False)
                 continue
             self.set_busy(False)
             if event['success']:
-                result=event['document']
+                result = event['document']
                 self.raw.setPlainText(result['raw'])
                 # QTextDocument normalizes line endings; reindex only if that changed raw coordinates.
-                if self.raw.toPlainText()!=result['raw']:
-                    result=self.core.apply_json(result['source'],self.raw.toPlainText())
-                self.show_document(result,f"返回解析 · {event['elapsed']:.1f} 秒")
-                reason=event['finish_reason']
-                if reason=='length':
-                    self.status.setText(self.status.text()+' · 提醒：输出达到 token 上限，后面的句子可能缺少标注；请缩短原文后重试。')
-                elif reason not in (None,'stop'):
-                    self.status.setText(self.status.text()+f' · 提醒：响应未正常结束（{reason}），请检查完整性。')
+                if self.raw.toPlainText() != result['raw']:
+                    result = self.core.apply_json(result['source'], self.raw.toPlainText())
+                self.show_document(result, f"返回解析 · {event['elapsed']:.1f} 秒")
+                reason = event['finish_reason']
+                if reason == 'length':
+                    self.status.setText(
+                        self.status.text() + ' · 提醒：输出达到 token 上限，后面的句子可能缺少标注；请缩短原文后重试。'
+                    )
+                elif reason not in (None, 'stop'):
+                    self.status.setText(self.status.text() + f' · 提醒：响应未正常结束（{reason}），请检查完整性。')
             else:
-                self.status.setText('请求提醒：'+event['data']+'；已显示本次原文。')
+                self.status.setText('请求提醒：' + event['data'] + '；已显示本次原文。')
 
     def closeEvent(self, event):
         unsaved = self.annotation_library.has_unsaved() or self.explanation_library.has_unsaved()

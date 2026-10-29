@@ -121,6 +121,20 @@ class DemoTests(unittest.TestCase):
         # The text layout must not shadow QWidget.layout().
         self.assertIsNone(w.subtitle.view.layout())
 
+    def test_hover_lift_animation_completes_and_resets(self):
+        w = self.window
+        w.demo()
+        view = w.subtitle.view
+        view.focus(0)
+        deadline = time.monotonic() + 1
+        while view.lift < 1 and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(.01)
+        self.assertEqual(view.lift, 1.0)
+        view.focus(None)
+        self.assertEqual(view.lift, 0)
+        self.assertIsNone(view.hovered)
+
     def test_subtitle_layout_and_utf16_selection(self):
         w, subtitle = self.window, self.window.subtitle
         w.demo()

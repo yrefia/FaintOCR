@@ -91,7 +91,7 @@ class PackagingTests(unittest.TestCase):
         entry = (ROOT / 'projects/faintocr-demo/main.py').read_text(encoding='utf-8')
         guard = "if importlib.util.find_spec('ia_learning_core') is None:\n    sys.path.insert("
         self.assertIn(guard, entry, '入口应先查找已安装的包，只在找不到时回退到源码路径')
-        self.assertEqual(entry.count('sys.path.insert'), 1)
+        self.assertEqual(entry.count("/ 'packages'"), 1)
 
 
 if __name__ == '__main__':
