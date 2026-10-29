@@ -123,14 +123,14 @@ class RuntimeTests(unittest.TestCase):
         io['write_debug_image'](target, np.zeros((8, 8, 3), dtype=np.uint8), cv2.imencode)
         self.assertTrue(target.read_bytes().startswith(b'\x89PNG'))
 
-    def test_original_ocr_construction_restored(self):
+    def test_engine_managed_models_without_config_override(self):
         self.assertFalse((PROJECT / 'runtime_paths.py').exists())
         tree = ast.parse((PROJECT / 'main.py').read_text(encoding='utf-8'))
         calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
                  and isinstance(n.func, ast.Name) and n.func.id == 'RapidOCR']
         self.assertEqual(len(calls), 2)
         self.assertEqual([{k.arg for k in call.keywords} for call in calls],
-                         [{'intra_op_num_threads'}, {'det_limit_side_len', 'det_limit_type', 'intra_op_num_threads'}])
+                         [{'params'}, {'params'}])
         self.assertFalse(any(isinstance(n, ast.FunctionDef) and n.name == 'prepare_ocr_config' for n in tree.body))
 
 

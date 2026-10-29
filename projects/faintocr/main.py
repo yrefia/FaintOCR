@@ -1,4 +1,4 @@
-"""Windows OCR application entry point; requires Python 3.12."""
+"""Windows OCR application for the workspace Python and RapidOCR 3.x environment."""
 import math
 import re
 import sys
@@ -42,7 +42,7 @@ from PySide6.QtGui import (
     QCursor,
 )
 from PySide6.QtWidgets import QApplication, QWidget
-from rapidocr_onnxruntime import RapidOCR
+from rapidocr import RapidOCR
 import cv2
 import numpy as np
 from rapidfuzz import process, fuzz
@@ -2612,7 +2612,13 @@ class OCRWorker(QtCore.QRunnable):
         调用 RapidOCR 引擎进行推理
         根据匹配模式、游戏和语言，动态进行特征过滤
         """
-        result, _ = engine(img)
+        output = engine(img)
+        if output.boxes is None or output.txts is None or output.scores is None:
+            result = []
+        else:
+            # Preserve the downstream filtering/presentation format.
+            result = [(box.tolist(), text, float(score))
+                      for box, text, score in zip(output.boxes, output.txts, output.scores, strict=True)]
 
         if not result:
             logger.debug(I18n.get("log_rapidocr_empty"))
@@ -3087,16 +3093,16 @@ class OCRController(QtCore.QObject):
 
         try:
             # 1. 实例化标准引擎 (负责兜底检测 + 最终的高精度识别)
-            self.ocr_engine_std = RapidOCR(
-                intra_op_num_threads=4
-            )
+            self.ocr_engine_std = RapidOCR(params={
+                "EngineConfig.onnxruntime.intra_op_num_threads": 4,
+            })
             # 2. 实例化轻量引擎 (专门用于第一波快速筛选)
-            # 可以传入一个更轻量的模型路径 det_model_path="..."，或者直接使用更小的边长限制
-            self.ocr_engine_light = RapidOCR(
-                det_limit_side_len=1280,  # 会导致部分文本不可识别
-                det_limit_type='max',  # 和上条联合使用
-                intra_op_num_threads=4  # 可以小幅提升速度
-            )
+            # 轻量路径继续使用 1280/max 的检测尺寸限制。
+            self.ocr_engine_light = RapidOCR(params={
+                "Det.limit_side_len": 1280,
+                "Det.limit_type": "max",
+                "EngineConfig.onnxruntime.intra_op_num_threads": 4,
+            })
         except Exception as e:
             logger.error(I18n.get("log_rapidocr_init_failed", e))
             self.ocr_engine_std = None

@@ -1,6 +1,6 @@
 # FaintOCR
 
-FaintOCR 主应用，入口为 `main.py`，源码来源为原 `4.2.2.py`。网络、屏幕、剪贴板和 OCR 协议保持原逻辑，本次仅重构资源与运行数据的 I/O 布局。
+FaintOCR 主应用，入口为 `main.py`，源码来源为原 `4.2.2.py`。已适配工作区 Python 3.14.10、RapidOCR 3.10.0、PySide6 6.12.0。网络、截图、剪贴板及下游文本过滤逻辑保持原有行为。
 
 ## 目录结构
 
@@ -46,15 +46,17 @@ faintocr/
 打包时需要：
 
 - 将本项目 `assets/` 收集到包内的 `assets/`，不能只设置 exe 图标而漏掉运行时 `logo.ico`。
-- 收集 `rapidocr_onnxruntime` 的 `config.yaml`、默认模型以及配置引用的字符表等数据，保留包内相对布局。使用 PyInstaller 时可在 spec 的 `datas` 中加入 `collect_data_files("rapidocr_onnxruntime")`，并加入 `(项目 assets 目录, "assets")`。
+- 收集 `rapidocr` 的配置、默认模型配置及引擎需要的数据，保留包内相对布局。使用 PyInstaller 时可在 spec 的 `datas` 中加入 `collect_data_files("rapidocr")`，并加入 `(项目 assets 目录, "assets")`。
 - 不打包 `runtime/`、本机配置、日志、导出文件或根目录 `deepseek_api_key.json`。
-- 在与旧 OCR 接口兼容、依赖齐全的环境构建。本次未生成或实测 exe；测试模拟了单文件、单目录及普通 frozen 路径分支。
+- 在安装根目录 requirements.txt 的当前兼容环境中构建。本次未生成或实测 exe；测试模拟了单文件、单目录及普通 frozen 路径分支。
 
 路径依据参见 [PyInstaller 运行时文档](https://pyinstaller.org/en/stable/runtime-information.html)。
 
 ## OCR 模型
 
-已恢复原始 `RapidOCR(...)` 初始化：标准引擎和轻量引擎自行使用其默认配置与模型。应用不再复制模型、创建哈希目录、验证修复模型缓存或重写模型配置；原有双引擎参数保持不变。
+使用 `from rapidocr import RapidOCR`。模型仍由引擎自行管理，应用不复制模型、不创建哈希目录、不重写配置文件。两个引擎的线程参数改为 `EngineConfig.onnxruntime.intra_op_num_threads=4`；轻量路径保留 `Det.limit_side_len=1280`、`Det.limit_type=max`，通过新版 `params` 字典传入。
+
+当前引擎默认使用 PP-OCRv6 检测/识别与分类模型。已有模型位于当前引擎的默认目录，首次使用或模型缺失时可能由 RapidOCR 下载。模型版本不同于原旧包的默认值，生成测试图识别通过不代表每个游戏场景的准确率和性能完全相同。
 
 撤回独立路径模块时，原子写入和调试图片处理函数放回 `main.py`，保留这些已经确认的行为。没有删除任何运行数据或模型文件。
 
@@ -81,7 +83,7 @@ faintocr/
 | 应用图标 | `assets/logo.ico` | 已从原目录复制为版本化资源 |
 | 系统字体 | Windows Fonts 的 segoeui、segoeuib、msyh、msyhbd | 未改 |
 | 屏幕像素 | MSS 截图 → NumPy/OpenCV | 未改 |
-| OCR 模型 | 由原 rapidocr_onnxruntime 引擎管理 | 已撤回应用侧模型缓存和配置重写 |
+| OCR 模型 | 由当前 rapidocr 引擎管理 | 已撤回应用侧模型缓存和配置重写 |
 | GitLab 仓库元数据 | HTTPS 请求仓库更新时间 | 未改 |
 | GitLab 原始词库下载 | HTTPS 流式下载到 raw 词库 | 网络协议不变，保存路径改变 |
 | 剪贴板 | Qt 手动/自动写入字幕 | 未改 |
@@ -91,15 +93,48 @@ faintocr/
 
 主程序没有 DeepSeek/API Key I/O，也没有调用 `ia_learning_core`。没有数据库、监听端口、子进程或文件选择对话框接口。
 
-## 环境兼容性与验证
+## 本次兼容性核查与修复
 
-工作区环境为 Python 3.14.10 + rapidocr 3.10.0，尚不具备完整运行此主程序的条件：缺少 orjson、mss、rapidfuzz、loguru 和 rapidocr_onnxruntime。原主程序仍依赖旧构造参数及 `result, _ = engine(img)` 返回协议，不能仅换 import 使用 RapidOCR 3.x。已移除为模型配置重写新增的 PyYAML 导入。
+| 核查项目 | 原问题 | 当前处理与结果 |
+| --- | --- | --- |
+| 导入依赖 | 缺少 orjson、mss、rapidfuzz、loguru，主程序首先在 orjson 处失败 | 已在项目 .venv 安装并在根 requirements.txt 锁定，包含 Windows 日志依赖 win32-setctime |
+| 引擎导入 | 导入未安装的 rapidocr_onnxruntime | 改为已安装的 rapidocr 3.10.0 |
+| 构造参数 | 旧线程和检测尺寸关键字不被新版接受 | 使用 params 中的完整配置键，保留原线程数和轻量检测尺寸 |
+| 返回结果 | 旧代码按 result, elapsed 解包 | 从输出对象 boxes/txts/scores 组装原过滤算法所需的框/文本/分数；处理空结果，字段长度不一致时明确报错 |
+| 文本过滤 | 需确认适配没有改变原有语义 | 同行空格、跨行换行、裁剪后高度筛选及未裁剪时保留结果均通过回归检查 |
+| 模糊匹配 | 缺失 RapidFuzz，无法匹配词库 | 补齐依赖，真实 TextMatcher 匹配检查通过 |
+| 屏幕截图 | 需确认 MSS 新版本支持当前调用 | MSS 10.2.0 的 MSS().grab 实测通过；16×16 测试区域未保存 |
+| Qt | 需验证当前 PySide6 的真实窗口行为 | 原生 Windows 浮球、字幕和设置窗口绘制、退出清理通过，无 Qt 回调异常 |
+| 图像处理 | 当前安装 opencv-python-headless | 本程序 GUI 由 Qt 提供，无需 OpenCV HighGUI；真实 OCRWorker 预处理和推理流程通过 |
+| 文件/日志 | 需验证新 Python 下配置、导出与日志写入 | 临时目录中的 orjson 设置保存、UTF-8 字幕导出和 Loguru 初始化/清理均通过 |
 
-本次未安装或替换 OCR 引擎，也未声称 FaintOCR 整体能运行。撤回后 21 项回归检查通过，包含：源码/模拟打包目录、raw/derived 分层、原子替换失败保护、调试清理边界、真实中文路径 PNG 写入、原始 OCR 构造参数检查，以及原有 Demo/密钥测试。主程序中的配置与词库 I/O 类使用 AST 提取执行，避开未安装的 OCR 依赖；这不等同于完整主程序启动测试。
+补齐版本为 orjson 3.13.0、mss 10.2.0、RapidFuzz 3.14.6、loguru 0.7.3、win32-setctime 1.2.1；pip check 未发现依赖冲突。
 
-运行全部检查（对照源码路径可选）：
+## 运行与检查
+
+无需切换目录即可运行：
+
+```powershell
+& "D:\IA\IA-Python-Workspace\.venv\Scripts\python.exe" "D:\IA\IA-Python-Workspace\projects\faintocr\main.py"
+```
+
+从仓库根目录执行回归测试：
 
 ```powershell
 $env:FAINTOCR_REFERENCE_PATH = 'D:\IA\OCR\FaintOCR\Codeia\5.x\Demo 5.4.3.py'
 .venv\Scripts\python.exe -B -m unittest discover -s tests -v
 ```
+
+27 项检查通过。快速测试不执行模型推理；其中保留的 I/O 测试使用 AST 提取，新增兼容性测试直接导入真实 FaintOCR 主模块。
+
+显式运行模型与主程序集成检查：
+
+```powershell
+.venv\Scripts\python.exe -B tests/check_faintocr.py
+# 显示短暂的原生窗口，并额外测试小区域屏幕抓取：
+.venv\Scripts\python.exe -B tests/check_faintocr.py --native --capture
+```
+
+集成检查实测通过：两个引擎识别生成的中英文图片；图像经后台线程 OCR → 字幕显示 → UTF-8 导出；原生窗口绘制；配置保存和退出。检查使用临时配置，不覆盖真实用户数据。正常运行会按项目目录约定生成 runtime 文件。
+
+验证边界：未进行真实游戏连续运行、各种 DPI/多显示器组合、GitLab 在线词库下载和打包 exe 的端到端验证；真实 API 密钥及 Demo 不受此次适配影响。原生窗口截图排除设置调用未报错，但未专门验证不同录屏软件中的排除效果。

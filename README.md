@@ -25,9 +25,11 @@ packages/
         └── explanation.txt
 tests/
 ├── check_rapidocr.py
+├── check_faintocr.py
 ├── test_credentials.py
 ├── test_demo.py
 ├── test_faintocr_runtime.py
+├── test_faintocr_compatibility.py
 └── test_prompt_files.py
 requirements.txt
 deepseek_api_key.json                # 本地配置，Git 忽略
@@ -80,7 +82,7 @@ $env:UV_PYTHON_INSTALL_DIR = "$PWD\.python"
 
 `tests/check_rapidocr.py` 渲染一张中英文图片并实际调用引擎，用于确认解释器、依赖、模型与推理链路可用；首次运行会把 PP-OCRv6 检测与识别模型下载到 `.venv\Lib\site-packages\rapidocr\models`（约 30 MB），之后可离线运行。它不命名为 `test_*.py`，因此 `unittest discover` 不会自动执行，单测保持快速、无模型依赖。
 
-兼容性说明：`projects/faintocr` 使用的是已停更的 `rapidocr_onnxruntime` 和旧调用约定（`result, _ = engine(img)`），与 rapidocr 3.x 不兼容，需要单独的 Python 3.12 环境或改写调用代码；本环境已补齐 PySide6 6.12.0，用于运行 Demo 5.5.0。
+兼容性说明：`projects/faintocr` 已适配当前 RapidOCR 3.x 的构造参数及输出对象，已补齐运行依赖。FaintOCR 和 Demo 均使用本工作区虚拟环境，原生窗口和生成图片的实际 OCR 流程已验证。
 
 ## DeepSeek API Key
 
@@ -130,7 +132,7 @@ $env:FAINTOCR_REFERENCE_PATH = "D:\IA\OCR\FaintOCR\Codeia\5.x\Demo 5.4.3.py"
 
 两条检查，互不干扰：
 
-- 回归单测：`.venv\Scripts\python.exe -B -m unittest discover -s tests -v`，共 21 项检查（含 FaintOCR 路径/文件 I/O 的 7 项检查）：密钥文件加载、无效配置提示与密钥更新，固定提示词加载与保存保护、5.4.3 对照解析及请求协议、真实 Qt 离屏启动与绘制、6 个离线标注的选择、错误恢复，以及模拟标注/解释请求、缓存和失败处理。均已在 Python 3.14.10 + PySide6 6.12.0 下通过，不调用真实 API。
+- 回归单测：`.venv\Scripts\python.exe -B -m unittest discover -s tests -v`，共 27 项检查（含 FaintOCR 路径/文件 I/O 的 7 项检查及接口兼容性的 6 项检查）：密钥文件加载、无效配置提示与密钥更新，固定提示词加载与保存保护、5.4.3 对照解析及请求协议、真实 Qt 离屏启动与绘制、6 个离线标注的选择、错误恢复，以及模拟标注/解释请求、缓存和失败处理。均已在 Python 3.14.10 + PySide6 6.12.0 下通过，不调用真实 API。
 - 环境自检：`.venv\Scripts\python.exe tests\check_rapidocr.py`，渲染中英文图片并真实调用 RapidOCR，首次运行需下载约 30 MB 模型。
 
 在 DSH 沙箱内运行时，两个使用 `tempfile.TemporaryDirectory` 的单测用例会在清理阶段报 `PermissionError: [WinError 5]`（沙箱拒绝修改目录权限），与 Python 版本无关，3.12 同样复现；环境自检在本环境通过。
@@ -398,6 +400,8 @@ $env:FAINTOCR_REFERENCE_PATH = "D:\IA\OCR\FaintOCR\Codeia\5.x\Demo 5.4.3.py"
 
 ## FaintOCR 兼容性审计
 
-当前主程序的完整 I/O 清单、环境缺项及目录迁移影响见 [FaintOCR README](projects/faintocr/README.md)。当前 FaintOCR 不能在本虚拟环境直接启动；Demo 的通过结果不能代替 OCR 主程序验证。
+当前主程序的完整 I/O 清单、环境缺项及目录迁移影响见 [FaintOCR README](projects/faintocr/README.md)。FaintOCR 已通过当前虚拟环境中的实际窗口与 OCR 工作流检查，详情及验证边界见项目 README。
 
-FaintOCR 源码运行数据位于项目 `runtime/`；打包运行数据默认位于 `%LOCALAPPDATA%/IA/FaintOCR/runtime/`，图标等只读资源从 `assets/` 加载。路径直接定义在 `main.py` 中，不提供环境变量覆盖。旧数据未迁移或删除；模型由原引擎自行管理。图标来源及打包资源要求见项目 README。
+FaintOCR 源码运行数据位于项目 `runtime/`；打包运行数据默认位于 `%LOCALAPPDATA%/IA/FaintOCR/runtime/`，图标等只读资源从 `assets/` 加载。路径直接定义在 `main.py` 中，不提供环境变量覆盖。旧数据未迁移或删除；模型由当前 RapidOCR 引擎自行管理。图标来源及打包资源要求见项目 README。
+
+FaintOCR 集成检查：`.venv\Scripts\python.exe -B tests/check_faintocr.py --native --capture`，使用临时配置和生成图像，测试原生 Qt、双引擎推理、后台 OCR 到字幕导出和 MSS 小区域抓取，不保存屏幕内容。首次缺少 OCR 模型时由 RapidOCR 自行下载。
