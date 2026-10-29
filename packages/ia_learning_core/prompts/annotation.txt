@@ -1,0 +1,187 @@
+依据下方 Category.md 的定义、优先级与范围规则，逐句标注英文原文，标出所有符合条件的内容。
+
+# 1. 输出格式与字段定义
+
+只返回合法 JSON，不输出 Markdown 代码围栏、解释或其他内容。严格遵循以下结构：
+
+```json
+{
+  "sentences": [
+    {
+      "source": "SOURCE",
+      "annotated": "ANNOTATED",
+      "annotations": [
+        {
+          "id": "ID",
+          "category": "CATEGORY",
+          "canonical": "CANONICAL"
+        }
+      ]
+    }
+  ]
+}
+```
+
+- sentences：按原文顺序排列的句子数组，每句对应一个对象，按原文顺序逐句输出，不得遗漏。
+- source：完整原文句子，保留原有文字、大小写、空格和标点，不得改写、纠错。
+- annotated：在 source 中插入 `<#ID>` 和 `</#ID>` 标签后的文本；删除所有标注标签后，必须与 source 完全一致。
+- annotations：该句所有标注对象的元数据。每项包含：
+  - id：标注 ID。
+  - category：Category.md 中对应子类的英文名称。
+  - canonical：标注对象的规范形式，具体规则见下文。
+
+没有符合条件的内容时，`annotations` 返回 `[]`，`annotated` 与 `source` 完全一致。
+
+# 2. 标注规则
+
+## 2.1 标注类型与范围
+
+- Word（W）：每个标注必须是单个完整单词。`canonical` 填写单词原形。
+- Expression（E）：每个标注必须是连续的多词表达，不能是单词，也不能有多段。`canonical` 填中可包含可替换槽位，但标注时必须标注包含所有 canonical 中成分的原文。
+- Syntax（S）：标注识别句法结构所必需的成分。允许由多个不连续片段组成，同一结构的所有片段共用一个 ID。`canonical` 是识别该特殊结构所必需的语法成分，填写规范句法模式。
+
+## 2.2 ID 与元数据
+
+- 使用 <#ID>原文片段</#ID> 标记范围。每句、每层分别从 1 开始，按出现顺序编号。
+- 每个独立标注对象在 `annotations` 中恰好对应一条记录；同一 Syntax 结构的多个片段共用一条记录。
+- `annotated` 只能插入标签，不得修改、增删或重排原文字符。移除所有标签后，必须与 `source` 完全一致。
+- `annotations` 按首次出现位置排列，同时出现时按 S > E > W 排序。
+- `canonical` 必须与实际标注的成分对应；原形还原和模式抽象仅写入 canonical，不得据此改写原文。
+
+## 2.3 分类与重叠
+
+- 严格遵循 Category.md 的定义、范围和优先级，不自行增删类别或改变标准。
+- 同层标注发生冲突时，保留优先级最高的类别。优先级低的标注受优先级高的标注挤压而缩小范围，缩小范围后仍符合原类别定义的标注，才可保留。
+- Word、Expression 和 Syntax 可以跨层重叠，符合条件的标注均须保留。
+
+
+# 3. Category.md
+
+- Word
+
+说明：每组示例独立编号，每条 word 必须用一对标签标注单个完整单词，不包含相邻词语。canonical 仅填写该单词的原形，不使用 <成分名称> 或 ...；词形还原仅用于 canonical，不改写原文。义项及词频归类以指定依据为准，以下示例不替代实际核验。
+
+| 优先级 | 大类 | 子类 | 可操作定义 | 原句上的标注与 canonical |
+|--------|------|------|------------|--------------------------|
+| 1 | 词汇学习类 | 非核心义项（Less Common Senses） | 当前语境中，实词使用的义项不属于该词性下最常用的前两个义项。 | ① 吸引、引起：The announcement <#W1>drew</#W1> considerable attention. → canonical：draw；② 处理：The report <#W1>addresses</#W1> several important issues. → canonical：address |
+| 2 | 词汇学习类 | 非高频实词（Beyond Top 2000） | 当前实词的原形不属于指定通用英语词频表中排名前 2000 的词条。 | ① 形容词：She kept <#W1>meticulous</#W1> records of every experiment. → canonical：meticulous；② 名词：Their meeting was an act of <#W1>serendipity</#W1>. → canonical：serendipity |
+
+- Expression
+
+说明：每组示例独立编号，每条 expression 必须用一对标签连续标注。canonical 中，固定词汇对应原文中的固定成分；<成分名称> 表示必须纳入标注的可替换内容；... 表示不纳入标注的内容。固定成分之间的填充内容必须一并标注。词形还原仅用于 canonical，不改写原文。
+
+| 优先级 | 大类 | 子类 | 可操作定义 | 原句上的标注与 canonical |
+|--------|------|------|------------|--------------------------|
+| 1 | A. 惯用程式类 | 习语与惯用语（Idioms & Conventional Expressions） | 具有约定俗成的整体意义或特殊用法的表达，其意义或用法往往不能完全从组成词语推导。 | ① 动词性习语：Her joke <#E1>broke the ice</#E1>. → canonical：break the ice；② 名词性习语：The exam was <#E1>a piece of cake</#E1>. → canonical：a piece of cake |
+| 2 | A. 惯用程式类 | 功能性套语（Formulaic Expressions） | 在特定交际情境或语篇组织中反复使用的固定或半固定表达，具有明确的交际或衔接功能。 | ① 人际交际：<#E1>Nice to meet you</#E1>, Anna. → canonical：nice to meet you；② 语篇衔接：<#E1>In other words</#E1>, we need more time. → canonical：in other words |
+| 3 | B. 半固定框架类 | 词汇框架（Lexical Frames） | 由固定的词汇核心与可替换的词汇槽位构成，能够通过替换槽位内容生成同类表达的半固定模式。 | ① 动词性框架：She <#E1>played an important role in</#E1> the project. → canonical：play a/an <Adjective> role in ...；② 名词性框架：The shop offers <#E1>a wide range of</#E1> books. → canonical：a <Adjective> range of ... |
+| 4 | C. 词汇组合类 | 多词动词（Multiword Verbs） | 动词与副词小品词或介词结合形成的动词性表达，具有特定的整体意义或搭配规则。 | ① 成分相邻：You can <#E1>depend on</#E1> her. → canonical：depend on ...；② 成分分离：Please <#E1>turn it off</#E1>. → canonical：turn <Object> off |
+| 5 | C. 词汇组合类 | 固定短语（Fixed Phrases） | 由相对固定的词语序列构成，通常作为整体使用，具有约定俗成且相对透明的意义。 | ① 时间短语：Please book your tickets <#E1>in advance</#E1>. → canonical：in advance；② 意图短语：He broke the cup <#E1>on purpose</#E1>. → canonical：on purpose |
+| 6 | C. 词汇组合类 | 词语搭配（Collocations） | 两个或多个词之间形成的习惯性组合，词语的选择受到搭配习惯或语法要求的限制。 | ① 动词与名词：We <#E1>made a decision</#E1> yesterday. → canonical：make a decision；② 形容词与名词：<#E1>Heavy rain</#E1> delayed the flight. → canonical：heavy rain |
+
+- Syntax
+
+说明：每组示例独立编号，同一结构的多个片段共用 S1。只标注识别特殊结构所必需的成分；canonical 中，必要的语法类别用 <成分名称> 表示，其余内容用 ... 表示。原句仅插入标签，不改写原文。
+
+| 优先级 | 大类 | 子类 | 可操作定义 | 原句上的标注与 canonical |
+|--------|------|------|------------|--------------------------|
+| 1 | A. 语气与特殊构式 | 虚拟语气 (Subjunctive) | 通过特定动词形式或句法结构，表达非真实假设、愿望、遗憾、建议或要求等。 | ① 非真实条件：<#S1>If</#S1> I <#S1>were</#S1> you, I <#S1>would</#S1> stay. → canonical：If ... were ... would ...；② 建议或要求：She <#S1>insisted that</#S1> he <#S1>be</#S1> present at the meeting. → canonical：insist that ... <BaseVerb> ... |
+| 2 | A. 语气与特殊构式 | 强调句 (Emphatic Constructions) | 仅包含分裂强调句 (It-cleft)。 | ① 普通强调句：<#S1>It was</#S1> Mary <#S1>who</#S1> opened the door. → canonical：It was ... who ...；② not until 强调句：<#S1>It was not until</#S1> midnight <#S1>that</#S1> he returned. → canonical：It was not until ... that ... |
+| 3 | B. 语序与成分变式 | 倒装 (Inversion) | 改变主语与谓语的常规语序，将助动词、情态动词或全部谓语置于主语之前，包括部分倒装和完全倒装。 | ① 部分倒装：<#S1>Only then did we</#S1> understand the truth. → canonical：Only <Adverbial> <Auxiliary> <Subject> ...；② 完全倒装：<#S1>On the hill stood a castle</#S1>. → canonical：<Locative> <Verb> <Subject> |
+| 4 | B. 语序与成分变式 | 省略句 (Ellipsis) | 在语法和语境允许的情况下，省去能够根据上下文或句法关系恢复的句子成分。 | ① 状语从句省略主语和 be：<#S1>When asked</#S1> about it, she remained silent. → canonical：When <PastParticiple> ...；② 并列分句省略重复谓语：<#S1>John ordered tea</#S1>, <#S1>and Mary coffee</#S1>. → canonical：<Subject> <Verb> <Object>, and <Subject> <Object> |
+| 5 | B. 语序与成分变式 | 前置 (Fronting) | 将宾语、表语、状语等成分移至非常规的前部位置，以突出信息或构成特定句式，包括让步前置。 | ① 让步前置：<#S1>Young as</#S1> he <#S1>is</#S1>, he understands a great deal. → canonical：<Adjective> as ... <Be> ...；② 宾语前置：<#S1>This book I treasure</#S1> more than any other. → canonical：<Object> <Subject> <Verb> ... |
+| 6 | C. 插入与附加结构 | 插入语 (Parentheticals) | 在句子主体中或边缘插入相对独立的成分，用于表达态度、补充说明、修正信息或组织语篇。 | ① 评注性小句：This is, <#S1>I think</#S1>, the best solution. → canonical：... I think ...；② 不定式短语：The result was, <#S1>to put it mildly</#S1>, disappointing. → canonical：... to put it mildly ... |
+
+
+# 4. 示例
+示例一：
+```json
+{
+  "sentences": [
+    {
+      "source": "Only by calling our cherished assumptions into question can we approach the truth with intellectual humility.",
+      "annotated": "<#S1>Only by <#E1>calling our <#W1>cherished</#W1> <#W2>assumptions</#W2> into question</#E1> can we</#S1> approach the truth with <#W3>intellectual</#W3> <#W4>humility</#W4>.",
+      "annotations": [
+        {
+          "id": "S1",
+          "category": "Inversion",
+          "canonical": "Only <Adverbial> <Auxiliary> <Subject>"
+        },
+        {
+          "id": "E1",
+          "category": "Idioms & Conventional Expressions",
+          "canonical": "call <Object> into question"
+        },
+        {
+          "id": "W1",
+          "category": "Beyond Top 2000",
+          "canonical": "cherish"
+        },
+        {
+          "id": "W2",
+          "category": "Beyond Top 2000",
+          "canonical": "assumption"
+        },
+        {
+          "id": "W3",
+          "category": "Beyond Top 2000",
+          "canonical": "intellectual"
+        },
+        {
+          "id": "W4",
+          "category": "Beyond Top 2000",
+          "canonical": "humility"
+        }
+      ]
+    }
+  ]
+}
+```
+示例二：
+```json
+{
+  "sentences": [
+    {
+      "source": "Rarely do we bring our most inchoate longings to fruition without first enduring disillusionment.",
+      "annotated": "<#S1>Rarely do we</#S1> <#E1>bring our most <#W1>inchoate</#W1> <#W2>longings</#W2> to <#W3>fruition</#W3></#E1> without first <#W4>enduring</#W4> <#W5>disillusionment</#W5>.",
+      "annotations": [
+        {
+          "id": "S1",
+          "category": "Inversion",
+          "canonical": "Rarely <Auxiliary> <Subject>"
+        },
+        {
+          "id": "E1",
+          "category": "Idioms & Conventional Expressions",
+          "canonical": "bring <Object> to fruition"
+        },
+        {
+          "id": "W1",
+          "category": "Beyond Top 2000",
+          "canonical": "inchoate"
+        },
+        {
+          "id": "W2",
+          "category": "Beyond Top 2000",
+          "canonical": "longing"
+        },
+        {
+          "id": "W3",
+          "category": "Beyond Top 2000",
+          "canonical": "fruition"
+        },
+        {
+          "id": "W4",
+          "category": "Beyond Top 2000",
+          "canonical": "endure"
+        },
+        {
+          "id": "W5",
+          "category": "Beyond Top 2000",
+          "canonical": "disillusionment"
+        }
+      ]
+    }
+  ]
+}
+```

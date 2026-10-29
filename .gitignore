@@ -1,0 +1,39 @@
+# Python environments and caches
+.python/
+.tooling/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# Local secrets and editor/OS state
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store
+*.log
+*.tmp
+
+# FaintOCR runtime data
+/projects/faintocr/UserConfig.json
+/projects/faintocr/UserConfig.json.*
+/projects/faintocr/TextMap/
+/projects/faintocr/OCR_Results/
+/projects/faintocr/logs/
+/projects/faintocr/Test/
+/projects/faintocr/detect_debug/
+/projects/faintocr/outputs/
+
+# Local DeepSeek credential
+/deepseek_api_key.json
