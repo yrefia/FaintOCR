@@ -131,7 +131,7 @@ $env:UV_PYTHON_INSTALL_DIR = "$PWD\.python"
 
 1. `annotate()` / `explain()` 的关键字参数 `key`（Demo 界面输入框，非空时优先）；
 2. 环境变量 `DEEPSEEK_API_KEY`；
-3. 环境变量 `IA_LEARNING_CONFIG_PATH` 指向的 JSON 文件；
+3. 环境变量 `IA_LEARNING_CONFIG_PATH` 指向的 JSON 文件（设置后文件不存在会直接报错，不回退到 4、5）；
 4. 用户配置目录 `%APPDATA%\IA\ia-learning-core\deepseek_api_key.json`；
 5. 仓库根目录 `deepseek_api_key.json`（源码检出时的历史位置，保留兼容）。
 

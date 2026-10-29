@@ -22,7 +22,10 @@ DEEPSEEK_CONFIG_PATH = Path(__file__).resolve().parents[2] / 'deepseek_api_key.j
 
 
 def config_candidates():
-    """Credential files in priority order; the first existing file wins."""
+    """Credential files in priority order; the first existing file wins.
+
+    A set ``IA_LEARNING_CONFIG_PATH`` is binding: ``load_deepseek_api_key`` uses only that file.
+    """
     configured = os.environ.get(CONFIG_PATH_ENV, '').strip()
     if configured:
         yield Path(configured)
@@ -45,8 +48,14 @@ def load_deepseek_api_key(config_path=None):
         environment_key = os.environ.get(API_KEY_ENV, '').strip()
         if environment_key:
             return _validated_key(environment_key)
+    configured = os.environ.get(CONFIG_PATH_ENV, '').strip()
     if config_path is not None:
         path = Path(config_path)
+    elif configured:
+        # 显式指定的文件缺失时直接报错，不回退到其他候选，以免悄悄用上另一把密钥。
+        path = Path(configured)
+        if not path.is_file():
+            raise ValueError(f'{CONFIG_PATH_ENV} 指向的 {path} 不存在，请修正该变量或创建文件。')
     else:
         path = next((candidate for candidate in config_candidates() if candidate.is_file()), None)
     if path is None:

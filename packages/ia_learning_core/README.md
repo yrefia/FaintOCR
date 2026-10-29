@@ -28,6 +28,6 @@
 
 ## 密钥
 
-`core.config_candidates()` 给出密钥文件优先级：`IA_LEARNING_CONFIG_PATH` → 用户配置目录 `%APPDATA%\IA\ia-learning-core\` → 仓库根目录。`DEEPSEEK_API_KEY` 环境变量优先于这些文件；`LearningCore.annotate(...)` 与 `explain(...)` 的关键字参数 `key` 优先级最高。资源和配置定位不依赖工作目录。
+`core.config_candidates()` 给出密钥文件优先级：`IA_LEARNING_CONFIG_PATH` → 用户配置目录 `%APPDATA%\IA\ia-learning-core\` → 仓库根目录；设置了 `IA_LEARNING_CONFIG_PATH` 时只使用该文件，文件不存在直接报错，不回退到后面的位置。`DEEPSEEK_API_KEY` 环境变量优先于这些文件；`LearningCore.annotate(...)` 与 `explain(...)` 的关键字参数 `key` 优先级最高。资源和配置定位不依赖工作目录。
 
 Demo 5.5.0 的提示词编辑器属于其入口，5.4.3 仅为对照基线，都不依赖本包的界面代码。

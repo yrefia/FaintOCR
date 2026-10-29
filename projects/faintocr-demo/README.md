@@ -28,4 +28,4 @@ Demo 只需要 Qt 界面，见 `requirements-demo.txt`（`PySide6-Essentials==6.
 
 提示词位置按 `ia_learning_core.prompt_dir()` 解析：`IA_PROMPT_DIR` 环境变量 → 源码检出时的包内 `prompts/`（改动随 Git 记录）→ 安装后的用户目录 `%APPDATA%\IA\ia-learning-core\prompts\`（首次从包内默认值复制）。界面只修改当前提示词文件，不覆盖其他副本。
 
-密钥解析顺序：界面输入 > `DEEPSEEK_API_KEY` > `IA_LEARNING_CONFIG_PATH` > `%APPDATA%\IA\ia-learning-core\deepseek_api_key.json` > 仓库根目录 `deepseek_api_key.json`。界面输入的密钥不会写入配置文件、请求体或界面历史；根目录文件被 Git 忽略，填写后即可发起请求。
+密钥解析顺序：界面输入 > `DEEPSEEK_API_KEY` > `IA_LEARNING_CONFIG_PATH` > `%APPDATA%\IA\ia-learning-core\deepseek_api_key.json` > 仓库根目录 `deepseek_api_key.json`。设置了 `IA_LEARNING_CONFIG_PATH` 而文件不存在时直接报错，不回退到后面的位置。界面输入的密钥不会写入配置文件、请求体或界面历史；根目录文件被 Git 忽略，填写后即可发起请求。

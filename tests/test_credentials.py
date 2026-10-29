@@ -68,6 +68,14 @@ class CredentialTests(unittest.TestCase):
             self.assertEqual(core.load_deepseek_api_key(), 'configured-key')
             self.assertEqual(core.load_deepseek_api_key(self.path), 'explicit-key')
 
+    def test_missing_configured_path_does_not_fall_back(self):
+        self.write({'api_key': 'repo-key'})
+        missing = self.folder_path / 'typo.json'
+        with self.sources(repository=self.path), self.environment(IA_LEARNING_CONFIG_PATH=str(missing)):
+            with self.assertRaisesRegex(ValueError, 'IA_LEARNING_CONFIG_PATH'):
+                core.load_deepseek_api_key()
+            self.assertEqual(core.load_deepseek_api_key(self.path), 'repo-key')
+
     def test_missing_empty_or_wrong_type_is_actionable(self):
         with self.assertRaisesRegex(ValueError, '缺少'):
             core.load_deepseek_api_key(self.path)
