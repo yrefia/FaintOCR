@@ -5,13 +5,14 @@ import sys
 import os
 import time
 import ctypes
+import tempfile
+import threading
 from collections import deque
 from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from ctypes import wintypes
 from urllib.parse import quote
-from runtime_paths import AppPaths, atomic_write_bytes, prepare_model_config, write_debug_image
 import orjson
 import mss
 import mss.tools
@@ -42,8 +43,6 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QApplication, QWidget
 from rapidocr_onnxruntime import RapidOCR
-from rapidocr_onnxruntime.main import DEFAULT_CFG_PATH
-import yaml
 import cv2
 import numpy as np
 from rapidfuzz import process, fuzz
@@ -53,28 +52,84 @@ from loguru import logger  # <--- [新增]
 # import onnxruntime as ort
 # print("当前可用的加速提供者:", ort.get_available_providers())
 
-# Resources are read-only; all mutable files belong to the runtime directory.
-PATHS = AppPaths.resolve(__file__)
-RUNTIME_ICON_FILE = PATHS.assets / 'logo.ico'
+# Define source and frozen paths directly in the application.
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).resolve().parent
+    ASSET_DIR = Path(getattr(sys, "_MEIPASS", BASE_DIR)) / "assets"
+    LOCAL_DATA_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    RUNTIME_DIR = LOCAL_DATA_DIR / "IA" / "FaintOCR" / "runtime"
+else:
+    BASE_DIR = Path(__file__).resolve().parent
+    ASSET_DIR = BASE_DIR / "assets"
+    RUNTIME_DIR = BASE_DIR / "runtime"
+RUNTIME_ICON_FILE = ASSET_DIR / "logo.ico"
 WINDOWS_APP_USER_MODEL_ID = "Lightscape.FaintOCR"
+
+
+def atomic_write_bytes(path, content):
+    """Write beside the destination and replace only after a successful flush."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='wb', prefix=target.name + '.', suffix='.tmp',
+                                         dir=target.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+_debug_lock = threading.Lock()
+
+
+def prune_debug_images(directory, *, max_files=200, max_age_days=3, now=None):
+    """Only remove generated PNGs in one of the two designated debug folders."""
+    directory = Path(directory).resolve()
+    allowed = [RUNTIME_DIR / 'debug' / 'detection', RUNTIME_DIR / 'debug' / 'preprocessing']
+    if directory not in allowed or not directory.is_relative_to(RUNTIME_DIR):
+        raise ValueError('Refusing to clean outside designated debug folders')
+    if max_files < 0 or max_age_days < 0:
+        raise ValueError('Debug retention limits must be nonnegative')
+    if not directory.exists():
+        return
+    now = time.time() if now is None else now
+    files = []
+    for path in directory.iterdir():
+        if path.is_symlink() or not path.is_file():
+            continue
+        if re.fullmatch(r'(?:diff_[0-9_]+|process_(?:input|cropped|[0-9]+))\.png', path.name):
+            files.append((path.stat().st_mtime, path))
+    for index, (modified, path) in enumerate(sorted(files, key=lambda item: item[0], reverse=True)):
+        if index >= max_files or modified < now - max_age_days * 86400:
+            path.unlink(missing_ok=True)
+
+
+def write_debug_image(path, image, encoder):
+    target = Path(path).resolve()
+    allowed = [RUNTIME_DIR / 'debug' / 'detection', RUNTIME_DIR / 'debug' / 'preprocessing']
+    if target.parent not in allowed:
+        raise ValueError('Debug image must be in a designated debug folder')
+    with _debug_lock:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        success, encoded = encoder('.png', image)
+        if not success:
+            raise OSError(f'无法写入调试图片：{target}')
+        atomic_write_bytes(target, encoded.tobytes())
+        prune_debug_images(target.parent)
 
 
 def save_debug_image(path, image):
     try:
-        write_debug_image(PATHS, path, image, cv2.imencode)
+        write_debug_image(path, image, cv2.imencode)
         return True
     except (OSError, ValueError, cv2.error) as exc:
         logger.warning('调试图片保存失败：{}', exc)
         return False
-
-
-def prepare_ocr_config():
-    config_path = Path(DEFAULT_CFG_PATH)
-    config = yaml.safe_load(config_path.read_text(encoding='utf-8'))
-    configured = prepare_model_config(config, config_path.parent, PATHS)
-    target = PATHS.models / 'config.yaml'
-    atomic_write_bytes(target, yaml.safe_dump(configured, allow_unicode=True).encode('utf-8'))
-    return str(target)
 
 
 # ====== [新增] 日志配置函数 ======
@@ -89,7 +144,7 @@ def set_windows_app_user_model_id(app_id=WINDOWS_APP_USER_MODEL_ID):
 
 def setup_logging():
     # 1. 创建日志目录
-    log_dir = str(PATHS.logs)
+    log_dir = str(RUNTIME_DIR / 'logs')
     os.makedirs(log_dir, exist_ok=True)
     # 2. 清除默认处理程序
     logger.remove()
@@ -706,14 +761,14 @@ class I18n:
 
 
 class Config:
-    TEXTMAP_ROOT = str(PATHS.dictionaries)
+    TEXTMAP_ROOT = str(RUNTIME_DIR / 'data' / 'dictionaries')
     @staticmethod
     def output_file_path():
         # 每次写入时取本地日期，持续运行跨午夜时自动切换文件。
-        return str(PATHS.subtitle_file())
+        return str(RUNTIME_DIR / 'exports' / 'subtitles' / f'{datetime.now():%Y-%m-%d}.txt')
 
-    USER_CONFIG_FILE = str(PATHS.settings)
-    PRE_OCR_CROP_DEBUG_DIR = str(PATHS.debug / 'preprocessing')
+    USER_CONFIG_FILE = str(RUNTIME_DIR / 'config' / 'settings.json')
+    PRE_OCR_CROP_DEBUG_DIR = str(RUNTIME_DIR / 'debug' / 'preprocessing')
     OCR = {
         "DEFAULT_REGION": (120, 800, 1680, 240),
         "DEFAULT_INTERVAL": 0.5,
@@ -722,7 +777,7 @@ class Config:
             "count_threshold": 0.250,
             "debounce_delay": 0.4,
             "debug": False,
-            "debug_dir": str(PATHS.debug / 'detection'),
+            "debug_dir": str(RUNTIME_DIR / 'debug' / 'detection'),
             "rules": {
                 "Genshin Impact": (
                     {"color": "FFFFFF", "space": "RGB", "tolerance": 16},
@@ -1374,7 +1429,15 @@ class TextMapLoader:
     @classmethod
     def get_file_path(cls, game_key, filename):
         game = Config.GAMES.get(game_key, {}).get("folder") or "unknown"
-        path = PATHS.dictionary_file(game, filename)
+        if not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', game):
+            raise ValueError('Invalid dictionary game directory')
+        if re.fullmatch(r'TextMap[A-Z]+\.json', filename):
+            category = 'raw'
+        elif re.fullmatch(r'(?:CanonicalMap|MatchStatic)-[A-Z]+to[A-Z]+\.json', filename):
+            category = 'derived'
+        else:
+            raise ValueError('Invalid dictionary filename')
+        path = Path(Config.TEXTMAP_ROOT) / game / category / filename
         path.parent.mkdir(parents=True, exist_ok=True)
         return str(path)
 
@@ -3023,16 +3086,13 @@ class OCRController(QtCore.QObject):
         self.current_data_mask = 0  # 内存中已加载的数据
 
         try:
-            model_config = prepare_ocr_config()
             # 1. 实例化标准引擎 (负责兜底检测 + 最终的高精度识别)
             self.ocr_engine_std = RapidOCR(
-                config_path=model_config,
                 intra_op_num_threads=4
             )
             # 2. 实例化轻量引擎 (专门用于第一波快速筛选)
             # 可以传入一个更轻量的模型路径 det_model_path="..."，或者直接使用更小的边长限制
             self.ocr_engine_light = RapidOCR(
-                config_path=model_config,
                 det_limit_side_len=1280,  # 会导致部分文本不可识别
                 det_limit_type='max',  # 和上条联合使用
                 intra_op_num_threads=4  # 可以小幅提升速度

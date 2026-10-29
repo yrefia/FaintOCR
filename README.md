@@ -9,7 +9,6 @@ projects/
 ├── faintocr/
 │   ├── README.md
 │   ├── main.py
-│   ├── runtime_paths.py
 │   ├── assets/logo.ico
 │   └── runtime/                   # 按需生成，Git 忽略
 └── faintocr-demo/
@@ -131,7 +130,7 @@ $env:FAINTOCR_REFERENCE_PATH = "D:\IA\OCR\FaintOCR\Codeia\5.x\Demo 5.4.3.py"
 
 两条检查，互不干扰：
 
-- 回归单测：`.venv\Scripts\python.exe -B -m unittest discover -s tests -v`，共 26 项检查（含 FaintOCR 路径/文件 I/O 的 12 项检查）：密钥文件加载、无效配置提示与密钥更新，固定提示词加载与保存保护、5.4.3 对照解析及请求协议、真实 Qt 离屏启动与绘制、6 个离线标注的选择、错误恢复，以及模拟标注/解释请求、缓存和失败处理。均已在 Python 3.14.10 + PySide6 6.12.0 下通过，不调用真实 API。
+- 回归单测：`.venv\Scripts\python.exe -B -m unittest discover -s tests -v`，共 21 项检查（含 FaintOCR 路径/文件 I/O 的 7 项检查）：密钥文件加载、无效配置提示与密钥更新，固定提示词加载与保存保护、5.4.3 对照解析及请求协议、真实 Qt 离屏启动与绘制、6 个离线标注的选择、错误恢复，以及模拟标注/解释请求、缓存和失败处理。均已在 Python 3.14.10 + PySide6 6.12.0 下通过，不调用真实 API。
 - 环境自检：`.venv\Scripts\python.exe tests\check_rapidocr.py`，渲染中英文图片并真实调用 RapidOCR，首次运行需下载约 30 MB 模型。
 
 在 DSH 沙箱内运行时，两个使用 `tempfile.TemporaryDirectory` 的单测用例会在清理阶段报 `PermissionError: [WinError 5]`（沙箱拒绝修改目录权限），与 Python 版本无关，3.12 同样复现；环境自检在本环境通过。
@@ -401,4 +400,4 @@ $env:FAINTOCR_REFERENCE_PATH = "D:\IA\OCR\FaintOCR\Codeia\5.x\Demo 5.4.3.py"
 
 当前主程序的完整 I/O 清单、环境缺项及目录迁移影响见 [FaintOCR README](projects/faintocr/README.md)。当前 FaintOCR 不能在本虚拟环境直接启动；Demo 的通过结果不能代替 OCR 主程序验证。
 
-FaintOCR 源码运行数据位于项目 `runtime/`；打包运行数据默认位于 `%LOCALAPPDATA%/IA/FaintOCR/runtime/`，图标等只读资源从 `assets/` 加载。`FAINTOCR_RUNTIME_DIR` 可用绝对路径覆盖数据根目录。旧数据未迁移或删除；图标来源、模型缓存及打包资源要求见项目 README。
+FaintOCR 源码运行数据位于项目 `runtime/`；打包运行数据默认位于 `%LOCALAPPDATA%/IA/FaintOCR/runtime/`，图标等只读资源从 `assets/` 加载。路径直接定义在 `main.py` 中，不提供环境变量覆盖。旧数据未迁移或删除；模型由原引擎自行管理。图标来源及打包资源要求见项目 README。
