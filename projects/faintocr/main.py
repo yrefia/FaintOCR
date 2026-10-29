@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from ctypes import wintypes
 from urllib.parse import quote
+from runtime_paths import AppPaths, atomic_write_bytes, prepare_model_config, write_debug_image
 import orjson
 import mss
 import mss.tools
@@ -41,6 +42,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QApplication, QWidget
 from rapidocr_onnxruntime import RapidOCR
+from rapidocr_onnxruntime.main import DEFAULT_CFG_PATH
+import yaml
 import cv2
 import numpy as np
 from rapidfuzz import process, fuzz
@@ -50,18 +53,28 @@ from loguru import logger  # <--- [新增]
 # import onnxruntime as ort
 # print("当前可用的加速提供者:", ort.get_available_providers())
 
-# ====== 路径获取逻辑修正 ======
-if getattr(sys, "frozen", False):
-    # 如果是打包后的 exe 运行，使用 exe 所在的实际目录
-    # sys.executable 指向 D:\xxx\xxx.exe
-    BASE_DIR = Path(sys.executable).resolve().parent
-else:
-    # 源码与运行数据使用 faintocr 项目目录。
-    BASE_DIR = Path(__file__).resolve().parent
-
-RUNTIME_ICON_FILE = BASE_DIR / "logo.ico"
+# Resources are read-only; all mutable files belong to the runtime directory.
+PATHS = AppPaths.resolve(__file__)
+RUNTIME_ICON_FILE = PATHS.assets / 'logo.ico'
 WINDOWS_APP_USER_MODEL_ID = "Lightscape.FaintOCR"
-# 数据根目录：源码模式为 faintocr 项目目录，打包模式为 exe 所在目录。
+
+
+def save_debug_image(path, image):
+    try:
+        write_debug_image(PATHS, path, image, cv2.imencode)
+        return True
+    except (OSError, ValueError, cv2.error) as exc:
+        logger.warning('调试图片保存失败：{}', exc)
+        return False
+
+
+def prepare_ocr_config():
+    config_path = Path(DEFAULT_CFG_PATH)
+    config = yaml.safe_load(config_path.read_text(encoding='utf-8'))
+    configured = prepare_model_config(config, config_path.parent, PATHS)
+    target = PATHS.models / 'config.yaml'
+    atomic_write_bytes(target, yaml.safe_dump(configured, allow_unicode=True).encode('utf-8'))
+    return str(target)
 
 
 # ====== [新增] 日志配置函数 ======
@@ -76,7 +89,7 @@ def set_windows_app_user_model_id(app_id=WINDOWS_APP_USER_MODEL_ID):
 
 def setup_logging():
     # 1. 创建日志目录
-    log_dir = os.path.join(BASE_DIR, "logs")
+    log_dir = str(PATHS.logs)
     os.makedirs(log_dir, exist_ok=True)
     # 2. 清除默认处理程序
     logger.remove()
@@ -693,15 +706,14 @@ class I18n:
 
 
 class Config:
-    # 直接基于 BASE_DIR 创建路径，不再用 dirname(dirname) 这种容易产生偏移的逻辑
-    TEXTMAP_ROOT = os.path.join(BASE_DIR, "TextMap")
+    TEXTMAP_ROOT = str(PATHS.dictionaries)
     @staticmethod
     def output_file_path():
         # 每次写入时取本地日期，持续运行跨午夜时自动切换文件。
-        return os.path.join(BASE_DIR, "OCR_Results", f"OCR_Results_{datetime.now():%Y-%m-%d}.txt")
+        return str(PATHS.subtitle_file())
 
-    USER_CONFIG_FILE = os.path.join(BASE_DIR, "UserConfig.json")
-    PRE_OCR_CROP_DEBUG_DIR = os.path.join(BASE_DIR, "Test")
+    USER_CONFIG_FILE = str(PATHS.settings)
+    PRE_OCR_CROP_DEBUG_DIR = str(PATHS.debug / 'preprocessing')
     OCR = {
         "DEFAULT_REGION": (120, 800, 1680, 240),
         "DEFAULT_INTERVAL": 0.5,
@@ -710,7 +722,7 @@ class Config:
             "count_threshold": 0.250,
             "debounce_delay": 0.4,
             "debug": False,
-            "debug_dir": os.path.join(BASE_DIR, "detect_debug"),
+            "debug_dir": str(PATHS.debug / 'detection'),
             "rules": {
                 "Genshin Impact": (
                     {"color": "FFFFFF", "space": "RGB", "tolerance": 16},
@@ -847,7 +859,7 @@ class Config:
     }
     GAMES = {
         "Genshin Impact": {
-            "folder": "Genshin Impact",
+            "folder": "genshin-impact",
             "gitlab_project": "Dimbreath/AnimeGameData2",
             "urls": {
                 "TextMapCHS.json": [
@@ -865,7 +877,7 @@ class Config:
             }
         },
         "Star Rail": {
-            "folder": "Star Rail",
+            "folder": "star-rail",
             "gitlab_project": "Dimbreath/turnbasedgamedata",
             "urls": {
                 "TextMapCHS.json": "https://gitlab.com/Dimbreath/turnbasedgamedata/-/raw/main/TextMap/TextMapCHS.json?inline=false",
@@ -946,10 +958,8 @@ class UserConfigManager:
     def save(cls, config):
         try:
             validated = cls.validate(config)
-            temp_file = f"{Config.USER_CONFIG_FILE}.tmp"
-            with open(temp_file, "wb") as config_file:
-                config_file.write(orjson.dumps(validated, option=orjson.OPT_INDENT_2))
-            os.replace(temp_file, Config.USER_CONFIG_FILE)
+            atomic_write_bytes(Config.USER_CONFIG_FILE,
+                               orjson.dumps(validated, option=orjson.OPT_INDENT_2))
         except Exception as exc:
             logger.error(I18n.get("log_config_save_failed", exc))
 
@@ -1363,14 +1373,10 @@ class TextMapLoader:
 
     @classmethod
     def get_file_path(cls, game_key, filename):
-        config = Config.GAMES.get(game_key, {})
-        folder = config.get("folder", "")
-        if not folder:
-            work_dir = os.path.join(Config.TEXTMAP_ROOT, "Unknown")
-        else:
-            work_dir = os.path.join(Config.TEXTMAP_ROOT, folder)
-        os.makedirs(work_dir, exist_ok=True)
-        return os.path.join(work_dir, filename)
+        game = Config.GAMES.get(game_key, {}).get("folder") or "unknown"
+        path = PATHS.dictionary_file(game, filename)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return str(path)
 
     @classmethod
     def file_earliest_time(cls, path):
@@ -1827,27 +1833,12 @@ class TextMapLoader:
     # [新增] 原子写入方法：先写 tmp，再重命名
     @classmethod
     def _save_file_atomic(cls, final_path, data, indent=False):
-        temp_path = final_path + ".tmp"
         try:
-            # 序列化参数
             option = orjson.OPT_INDENT_2 if indent else 0
-
-            with open(temp_path, 'wb') as f:
-                f.write(orjson.dumps(data, option=option))
-                f.flush()
-                os.fsync(f.fileno())  # 强制刷入磁盘，防止断电数据丢失
-
-            # 原子操作：如果 final_path 已存在，会无声覆盖
-            # 这一步极快，几乎不可能被中断
-            os.replace(temp_path, final_path)
+            atomic_write_bytes(final_path, orjson.dumps(data, option=option))
             return True
-        except Exception as e:
-            logger.critical(I18n.get("log_atomic_write_failed", final_path, e))
-            if os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except:
-                    pass
+        except Exception as exc:
+            logger.critical(I18n.get("log_atomic_write_failed", final_path, exc))
             return False
 
 
@@ -2083,7 +2074,7 @@ class DetectorWorker(QtCore.QObject):
                 debug_bgr[removed_mask > 0] = (0, 0, 255)
                 debug_bgr[added_mask > 0] = (0, 255, 0)
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                cv2.imwrite(os.path.join(self.config.debug_dir, f"diff_{timestamp}.png"), debug_bgr)
+                save_debug_image(os.path.join(self.config.debug_dir, f"diff_{timestamp}.png"), debug_bgr)
         return rgb, self._mask_buffer
 
     def _set_baseline(self, mask):
@@ -2289,19 +2280,19 @@ class OCRWorker(QtCore.QRunnable):
         if debug:
             debug_dir = debug_dir or Config.PRE_OCR_CROP_DEBUG_DIR
             os.makedirs(debug_dir, exist_ok=True)
-            cv2.imwrite(os.path.join(debug_dir, "process_0.png"), mask)
+            save_debug_image(os.path.join(debug_dir, "process_0.png"), mask)
 
         if close_kernel_size is not None:
             kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, close_kernel_size)
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_close)
             if debug:
-                cv2.imwrite(os.path.join(debug_dir, "process_1.png"), mask)
+                save_debug_image(os.path.join(debug_dir, "process_1.png"), mask)
 
         if open_kernel_size is not None:
             kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, open_kernel_size)
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_open)
             if debug:
-                cv2.imwrite(os.path.join(debug_dir, "process_2.png"), mask)
+                save_debug_image(os.path.join(debug_dir, "process_2.png"), mask)
 
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -2331,7 +2322,7 @@ class OCRWorker(QtCore.QRunnable):
                     cv2.rectangle(img, (x, y), (x + w, y + h_box), (0, 0, 255), 2)
 
         if debug:
-            cv2.imwrite(os.path.join(debug_dir, "process_4.png"), img)
+            save_debug_image(os.path.join(debug_dir, "process_4.png"), img)
 
         return results
 
@@ -2359,7 +2350,7 @@ class OCRWorker(QtCore.QRunnable):
 
         if debug_enabled:
             os.makedirs(Config.PRE_OCR_CROP_DEBUG_DIR, exist_ok=True)
-            cv2.imwrite(os.path.join(Config.PRE_OCR_CROP_DEBUG_DIR, "process_input.png"), img_cv)
+            save_debug_image(os.path.join(Config.PRE_OCR_CROP_DEBUG_DIR, "process_input.png"), img_cv)
 
         boxes = cls.extract_shape_by_color(
             img_cv,
@@ -2401,7 +2392,7 @@ class OCRWorker(QtCore.QRunnable):
         cropped_img = img_cv[crop_y:, :].copy()
         logger.debug(I18n.get("debug_crop_applied", crop_y, image_h, image_h - crop_y))
         if debug_enabled:
-            cv2.imwrite(os.path.join(Config.PRE_OCR_CROP_DEBUG_DIR, "process_cropped.png"), cropped_img)
+            save_debug_image(os.path.join(Config.PRE_OCR_CROP_DEBUG_DIR, "process_cropped.png"), cropped_img)
         return cropped_img, True
 
     def run(self):
@@ -3032,13 +3023,16 @@ class OCRController(QtCore.QObject):
         self.current_data_mask = 0  # 内存中已加载的数据
 
         try:
+            model_config = prepare_ocr_config()
             # 1. 实例化标准引擎 (负责兜底检测 + 最终的高精度识别)
             self.ocr_engine_std = RapidOCR(
+                config_path=model_config,
                 intra_op_num_threads=4
             )
             # 2. 实例化轻量引擎 (专门用于第一波快速筛选)
             # 可以传入一个更轻量的模型路径 det_model_path="..."，或者直接使用更小的边长限制
             self.ocr_engine_light = RapidOCR(
+                config_path=model_config,
                 det_limit_side_len=1280,  # 会导致部分文本不可识别
                 det_limit_type='max',  # 和上条联合使用
                 intra_op_num_threads=4  # 可以小幅提升速度
@@ -3589,7 +3583,6 @@ class OCRController(QtCore.QObject):
             self.auto_load_timer.start(1200)
 
 # ===== Floating UI =====
-OUTPUT_DIR = BASE_DIR / "outputs"
 FONT_FILES = [
     "C:/Windows/Fonts/segoeui.ttf",
     "C:/Windows/Fonts/segoeuib.ttf",

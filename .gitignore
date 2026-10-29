@@ -26,6 +26,7 @@ Thumbs.db
 *.tmp
 
 # FaintOCR runtime data
+/projects/faintocr/runtime/
 /projects/faintocr/UserConfig.json
 /projects/faintocr/UserConfig.json.*
 /projects/faintocr/TextMap/
