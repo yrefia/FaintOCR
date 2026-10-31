@@ -25,6 +25,50 @@ def publish(session, event):
 
 
 class StreamingTests(unittest.TestCase):
+    def test_real_missing_hash_response_preserves_all_six_sentences(self):
+        fixture = json.loads((Path(__file__).parent / 'fixtures/missing_hash_annotation.json').read_text(encoding='utf-8'))
+        raw = json.dumps(fixture['response'], ensure_ascii=False)
+        document = core.parse_annotation(fixture['input'], raw)
+        self.assertEqual(len(document['items']), 30)
+        self.assertEqual({i['annotation']['sentence_index'] for i in document['items']}, set(range(1, 7)))
+        expression = next(i for i in document['items'] if i['annotation']['sentence_index'] == 5
+                          and i['annotation']['id'] == 'E1')
+        a, b = expression['ranges'][0]
+        self.assertEqual(fixture['input'][a:b], 'come to terms with')
+        self.assertTrue(any('标签格式不规范' in str(w) for w in document['warnings']))
+        self.assertFalse(any('未覆盖原文末尾' in str(w) for w in document['warnings']))
+
+    def test_typo_in_tag_keeps_ranges_and_original_json_locations(self):
+        for markup in ('<#W1>Hello</W1>.', '<W1>Hello</#W1>.', '< #W1 >Hello< / W1 >.'):
+            raw = json.dumps({'sentences': [{'annotated': markup, 'annotations': [
+                {'id': 'W1', 'category': 'Beyond Top 2000', 'canonical': 'hello'}]}]})
+            for partial in (False, True):
+                doc = core.parse_annotation('Hello.', raw, partial=partial)
+                [item] = doc['items']
+                self.assertEqual(item['ranges'], [(0, 5)])
+                self.assertEqual(doc['raw'], raw)
+                self.assertTrue(any('标签格式不规范' in str(w) for w in doc['warnings']))
+                self.assertTrue(core.item_json_ranges(item, raw, doc['locations']))
+
+    def test_broken_range_does_not_hide_other_ranges_or_later_sentence(self):
+        value = {'sentences': [
+            {'annotated': '<#W1>Hello <#W2>world</#W2>.', 'annotations': []},
+            {'annotated': '<#W1>Goodbye</#W1>.', 'annotations': []}]}
+        doc = core.parse_annotation('Hello world. Goodbye.', json.dumps(value))
+        self.assertEqual([i['ranges'] for i in doc['items']], [[(6, 11)], [(13, 20)]])
+        value['sentences'][0]['annotated'] = 'Changed text.'
+        doc = core.parse_annotation('Hello world. Goodbye.', json.dumps(value))
+        self.assertEqual([i['ranges'] for i in doc['items']], [[(13, 20)]])
+        self.assertTrue(any('恢复定位' in str(w) for w in doc['warnings']))
+
+    def test_missing_metadata_keeps_verified_visual_range(self):
+        for records in (None, [], [{'id': 'W1'}]):
+            raw = json.dumps({'sentences': [{'annotated': '<#W1>Hello</#W1>.', 'annotations': records}]})
+            [item] = core.parse_annotation('Hello.', raw)['items']
+            self.assertEqual(item['ranges'], [(0, 5)])
+            self.assertEqual(item['category'], 'word')
+            self.assertTrue(item['metadata_pending'])
+
     def test_sourceless_stream_and_repeated_sentences(self):
         sentence = {'annotated': '<#W1>Hello</#W1>.',
                     'annotations': [{'id': 'W1', 'category': 'Beyond Top 2000', 'canonical': 'hello'}]}
@@ -44,7 +88,7 @@ class StreamingTests(unittest.TestCase):
         sentence = {'annotated': '<#W1>Hello</#W1>.',
                     'annotations': [{'id': 'W1', 'category': 'Beyond Top 2000', 'canonical': 'hello'}]}
         raw = json.dumps({'sentences': [sentence]})
-        for source in ('Hallo.', 'Missing. Hello.', '<#W1>Hello</#W1>.'):
+        for source in ('Hallo.', 'Missing. Hello. Hello.', '<#W1>Hello</#W1>.'):
             result = core.parse_annotation(source, raw)
             self.assertEqual(result['items'], [])
             self.assertTrue(result['warnings'])

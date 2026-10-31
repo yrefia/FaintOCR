@@ -122,6 +122,8 @@ TAG_CATEGORIES = {
 # 标签字母到层级键（W 单词、E 表达、S 句法）；CATEGORIES 与 view 都按层级键取用。
 LAYER_KEYS = {'W': 'word', 'E': 'phrase', 'S': 'grammar'}
 TAG_RE = re.compile(r'<(/?)#([WES][1-9][0-9]*)>')
+# Tolerate formatting slips, but only render after exact original-text alignment.
+RANGE_TAG_RE = re.compile(r'<\s*(/?)\s*#?\s*([WES][1-9][0-9]*)\s*>')
 
 
 class AnnotationError(ValueError):
@@ -332,31 +334,29 @@ def resolve_items(value, text, issues=None, *, preview=False) -> 'list[Item]':
         source, markup, records = (group.get(k) for k in ('source','annotated','annotations'))
         inferred_source = 'source' not in group
         if inferred_source and isinstance(markup, str):
-            source = TAG_RE.sub('', markup)
+            source = RANGE_TAG_RE.sub('', markup)
         if not isinstance(source,str) or not source:
             note('缺少有效 source，已跳过。','source'); continue
         # Prefer the next exact source position; fallback only when unambiguous.
         offset = cursor
         if not text.startswith(source,offset):
             while offset < len(text) and text[offset].isspace(): offset += 1
-        if not text.startswith(source,offset) and inferred_source:
-            note('移除标签后的 annotated 与原文当前位置不一致（可能改写、遗漏或原文含标签），已跳过此句。')
-            continue
         if not text.startswith(source,offset):
             matches = [m.start() for m in re.finditer('(?='+re.escape(source)+')',text)]
             later = [p for p in matches if p >= cursor]
-            candidates = later if later else matches
+            candidates = later if inferred_source else (later if later else matches)
             if len(candidates) != 1:
                 note('source 无法唯一对应原文，已跳过此句。','source'); continue
             offset = candidates[0]
-            note('句子遗漏或顺序不一致；已按唯一原文位置定位。','source')
+            note('前文有遗漏或无法解析；已按后续原文唯一精确匹配恢复定位。', 'annotated' if inferred_source else 'source')
         cursor = max(cursor,offset+len(source))
         if not isinstance(markup,str):
             note('缺少有效 annotated，已跳过此句。'); continue
         if records is None and preview:
             records = []
         if not isinstance(records,list):
-            note('annotations 不是数组，已跳过此句。','annotations'); continue
+            note('annotations 不是数组；保留可验证范围，属性暂不可用。','annotations')
+            records = []
         attrs, duplicate = {}, set()
         for ri, record in enumerate(records):
             rp = path+('annotations',ri)
@@ -372,12 +372,14 @@ def resolve_items(value, text, issues=None, *, preview=False) -> 'list[Item]':
         pos = offset_local = 0
         aligned = True
         while pos < len(markup):
-            literal = TAG_RE.match(source,offset_local)
+            literal = RANGE_TAG_RE.match(source,offset_local)
             if literal and markup.startswith(literal.group(),pos):
                 pos += len(literal.group()); offset_local = literal.end(); continue
-            token = TAG_RE.match(markup,pos)
+            token = RANGE_TAG_RE.match(markup,pos)
             if token:
                 closing, identity = token.groups()
+                if not TAG_RE.fullmatch(token.group()):
+                    note('标签格式不规范（缺少 # 或含多余空白）；已结合原文恢复范围。', position=pos, identity=identity)
                 if closing:
                     if identity not in active:
                         note('结束标签没有对应开始标签，该 ID 已跳过。',position=pos,identity=identity); invalid.add(identity)
@@ -412,20 +414,23 @@ def resolve_items(value, text, issues=None, *, preview=False) -> 'list[Item]':
             if int(identity[1:]) != counts[layer]:
                 note('编号未按层从 1 连续递增，已按实际标签定位。',position=starts[identity],identity=identity)
             if identity not in attrs and not preview:
-                note('缺少属性记录，已跳过该 ID。',position=starts[identity],identity=identity); continue
+                note('缺少属性记录；保留可验证范围，属性暂不可用。',position=starts[identity],identity=identity)
             if identity in invalid or identity in duplicate: continue
             local=spans.get(identity,[])
             if not local: continue
             pending = identity not in attrs
             record,rp=attrs.get(identity, ({'id': identity}, path + ('annotated',)))
             category,canonical=record.get('category'),record.get('canonical')
-            if pending:
-                category = '属性接收中'
-                canonical = ' / '.join(source[a:b] for a,b in local)
             if not isinstance(canonical,str) or not canonical.strip():
-                warn('canonical 缺失，已跳过该 ID。',rp,identity=identity); continue
+                if not pending:
+                    warn('canonical 缺失；暂以原文片段显示。',rp,identity=identity)
+                canonical = ' / '.join(source[a:b] for a,b in local)
+                pending = True
             if not isinstance(category,str) or not category.strip():
-                warn('category 缺失，已跳过该 ID。',rp,identity=identity); continue
+                if not pending:
+                    warn('category 缺失；仍按标签层级渲染。',rp,identity=identity)
+                category = '属性接收中' if preview else '属性不完整'
+                pending = True
             if not pending and category not in TAG_CATEGORIES[layer]:
                 warn(f'未知子类 {category}，保留原值显示，请核对分类依据。',rp,identity=identity)
             if layer != 'S' and len(local)>1:
@@ -630,7 +635,7 @@ def item_json_ranges(item, raw, locations):
         markup = json.loads(raw[start:end])
         boundaries = decoded_boundaries(raw, start, end)
         opening = None
-        for match in TAG_RE.finditer(markup):
+        for match in RANGE_TAG_RE.finditer(markup):
             if match[2] != annotation['id']:
                 continue
             if not match[1]:
@@ -660,7 +665,7 @@ def warning_locations(raw, locations, warnings):
             boundaries = decoded_boundaries(raw, start, end)
             decoded = json.loads(raw[start:end])
             position = min(position, len(boundaries)-1)
-            token = TAG_RE.match(decoded, position)
+            token = RANGE_TAG_RE.match(decoded, position)
             stop = min(position+(len(token.group()) if token else 1), len(boundaries)-1)
             start, end = boundaries[position], boundaries[stop]
         label = ('第 '+str(path[1]+1)+' 句') if len(path)>1 and path[0]=='sentences' else '返回 JSON'
@@ -813,7 +818,7 @@ class LearningCore:
         if not 0 <= number < len(self.document['items']):
             raise ValueError('请选择有效标注。')
         if self.document['items'][number].get('metadata_pending'):
-            return {'state': 'pending', 'text': '标注属性接收中…', 'payload': None}
+            return {'state': 'pending', 'text': '标注属性尚不完整，暂无法请求解释。', 'payload': None}
         token = (self.revision, number, prompt, model)
         self.selected_explanation = token
         if token in self.explanation_cache:

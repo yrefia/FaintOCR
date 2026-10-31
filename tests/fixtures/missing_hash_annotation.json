@@ -1,0 +1,187 @@
+{
+  "input": "Rarely have I encountered so perspicacious a memorandum that nonetheless contrives to obfuscate its central desideratum. In light of the auditors’ misgivings, the chair insisted that the proposal be revised before it was put forward; were the board to gloss over the recalcitrant data, any consensus would be a far cry from genuine accord. It was not until the deputy took issue with the magniloquent preamble that the committee began to zero in on the equivocations embedded in the appendix. By virtue of its circumlocutory phrasing, the report pays lip service to transparency while casting doubt on its own conclusions. Had the authors come to terms with these contradictions, they might have avoided the obdurate resistance that ensued. What ultimately undermined the initiative was not paucity of evidence but the sycophantic deference with which its advocates parried every objection.",
+  "response": {
+    "sentences": [
+      {
+        "annotated": "<#S1>Rarely have I</#S1> encountered so <#W1>perspicacious</#W1> a <#W2>memorandum</#W2> that nonetheless <#E1>contrives to <#W3>obfuscate</#W3></#E1> its central <#W4>desideratum</#W4>.",
+        "annotations": [
+          {
+            "id": "S1",
+            "category": "Inversion",
+            "canonical": "Rarely <Auxiliary> <Subject>"
+          },
+          {
+            "id": "E1",
+            "category": "Idioms & Conventional Expressions",
+            "canonical": "contrive to <Verb>"
+          },
+          {
+            "id": "W1",
+            "category": "Beyond Top 2000",
+            "canonical": "perspicacious"
+          },
+          {
+            "id": "W2",
+            "category": "Beyond Top 2000",
+            "canonical": "memorandum"
+          },
+          {
+            "id": "W3",
+            "category": "Beyond Top 2000",
+            "canonical": "obfuscate"
+          },
+          {
+            "id": "W4",
+            "category": "Beyond Top 2000",
+            "canonical": "desideratum"
+          }
+        ]
+      },
+      {
+        "annotated": "In light of the auditors’ <#W1>misgivings</#W1>, the chair <#S1>insisted that</#S1> the proposal <#S1>be</#S1> revised before it was <#E1>put forward</#E1>; <#S2>were</#S2> the board to <#E2>gloss over</#E2> the <#W2>recalcitrant</#W2> data, any consensus would be <#E3>a far cry from</#E3> genuine <#W3>accord</#W3>.",
+        "annotations": [
+          {
+            "id": "S1",
+            "category": "Subjunctive",
+            "canonical": "insist that ... <BaseVerb> ..."
+          },
+          {
+            "id": "S2",
+            "category": "Subjunctive",
+            "canonical": "were ... to ..."
+          },
+          {
+            "id": "E1",
+            "category": "Multiword Verbs",
+            "canonical": "put forward"
+          },
+          {
+            "id": "E2",
+            "category": "Idioms & Conventional Expressions",
+            "canonical": "gloss over"
+          },
+          {
+            "id": "E3",
+            "category": "Idioms & Conventional Expressions",
+            "canonical": "a far cry from"
+          },
+          {
+            "id": "W1",
+            "category": "Beyond Top 2000",
+            "canonical": "misgiving"
+          },
+          {
+            "id": "W2",
+            "category": "Beyond Top 2000",
+            "canonical": "recalcitrant"
+          },
+          {
+            "id": "W3",
+            "category": "Beyond Top 2000",
+            "canonical": "accord"
+          }
+        ]
+      },
+      {
+        "annotated": "<#S1>It was not until</#S1> the deputy <#E1>took issue with</#E1> the <#W1>magniloquent</#W1> preamble <#S1>that</#S1> the committee began to <#E2>zero in on</#E2> the <#W2>equivocations</#W2> embedded in the appendix.",
+        "annotations": [
+          {
+            "id": "S1",
+            "category": "Emphatic Constructions",
+            "canonical": "It was not until ... that ..."
+          },
+          {
+            "id": "E1",
+            "category": "Idioms & Conventional Expressions",
+            "canonical": "take issue with"
+          },
+          {
+            "id": "E2",
+            "category": "Multiword Verbs",
+            "canonical": "zero in on"
+          },
+          {
+            "id": "W1",
+            "category": "Beyond Top 2000",
+            "canonical": "magniloquent"
+          },
+          {
+            "id": "W2",
+            "category": "Beyond Top 2000",
+            "canonical": "equivocation"
+          }
+        ]
+      },
+      {
+        "annotated": "<#E1>By virtue of</#E1> its <#W1>circumlocutory</#W1> phrasing, the report <#E2>pays lip service to</#E2> transparency while casting doubt on its own conclusions.",
+        "annotations": [
+          {
+            "id": "E1",
+            "category": "Fixed Phrases",
+            "canonical": "by virtue of"
+          },
+          {
+            "id": "E2",
+            "category": "Idioms & Conventional Expressions",
+            "canonical": "pay lip service to"
+          },
+          {
+            "id": "W1",
+            "category": "Beyond Top 2000",
+            "canonical": "circumlocutory"
+          }
+        ]
+      },
+      {
+        "annotated": "<#S1>Had</#S1> the authors <#E1>come to terms with</E1> these contradictions, they might have avoided the <#W1>obdurate</#W1> resistance that ensued.",
+        "annotations": [
+          {
+            "id": "S1",
+            "category": "Subjunctive",
+            "canonical": "Had ..."
+          },
+          {
+            "id": "E1",
+            "category": "Idioms & Conventional Expressions",
+            "canonical": "come to terms with"
+          },
+          {
+            "id": "W1",
+            "category": "Beyond Top 2000",
+            "canonical": "obdurate"
+          }
+        ]
+      },
+      {
+        "annotated": "<#S1>What ultimately undermined the initiative was</#S1> not <#W1>paucity</#W1> of evidence but the <#W2>sycophantic</#W2> <#W3>deference</#W3> with which its advocates <#E1>parried</#E1> every objection.",
+        "annotations": [
+          {
+            "id": "S1",
+            "category": "Emphatic Constructions",
+            "canonical": "What ... was ..."
+          },
+          {
+            "id": "E1",
+            "category": "Idioms & Conventional Expressions",
+            "canonical": "parry <Object>"
+          },
+          {
+            "id": "W1",
+            "category": "Beyond Top 2000",
+            "canonical": "paucity"
+          },
+          {
+            "id": "W2",
+            "category": "Beyond Top 2000",
+            "canonical": "sycophantic"
+          },
+          {
+            "id": "W3",
+            "category": "Beyond Top 2000",
+            "canonical": "deference"
+          }
+        ]
+      }
+    ]
+  }
+}
