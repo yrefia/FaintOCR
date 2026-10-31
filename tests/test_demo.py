@@ -219,9 +219,9 @@ class DemoTests(unittest.TestCase):
     def test_key_startup_mask_and_no_fallback(self):
         w = self.window
         self.assertEqual(w.key.text(), 'startup-test-key-1234')
-        self.assertEqual(w.key.masked_text(), 'startup-…1234')
+        self.assertEqual(w.key.masked_text(), 'startup-' + '•' * 9 + '1234')
         w.key.setText('short')
-        self.assertEqual(w.key.masked_text(), '•••••')
+        self.assertEqual(w.key.masked_text(), 'short')
         w.key.clear()
         w.english.setPlainText(self.module['SAMPLE'])
         with patch.object(core, 'load_deepseek_api_key', side_effect=AssertionError('No reload')):
@@ -233,6 +233,25 @@ class DemoTests(unittest.TestCase):
                 w.select_item(0)
                 self.assertIn('请输入 API Key', w.details.text())
                 transport.assert_not_called()
+
+    def test_key_native_editing(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        edit = self.window.key
+        edit.setText('abcdefgh1234567890wxyz')
+        edit.setFocus()
+        edit.setCursorPosition(10)
+        QTest.keyClicks(edit, 'AB')
+        self.assertEqual(edit.text(), 'abcdefgh12AB34567890wxyz')
+        self.assertEqual(len(edit.masked_text()), len(edit.text()))
+        edit.setSelection(8, 4)
+        QTest.keyClicks(edit, 'Z')
+        self.assertEqual(edit.text(), 'abcdefghZ34567890wxyz')
+        QTest.keyClick(edit, Qt.Key_Backspace)
+        self.assertEqual(edit.text(), 'abcdefgh34567890wxyz')
+        edit.selectAll()
+        QTest.keyClick(edit, Qt.Key_Delete)
+        self.assertEqual(edit.text(), '')
 
     def test_editor_save_reload_conflict_and_cancel(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:

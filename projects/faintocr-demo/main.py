@@ -59,30 +59,46 @@ class ApiKeyEdit(QLineEdit):
         super().__init__()
         self.setEchoMode(QLineEdit.Password)
         self.setPlaceholderText('请输入 API Key')
-        self.setToolTip('仅显示前 8 位和后 4 位；Ctrl+A 后粘贴可替换完整密钥。')
+        self.setToolTip('前 8 位和后 4 位可见，其余字符逐位显示圆点；支持直接编辑。')
         self.textChanged.connect(self.update)
         self.selectionChanged.connect(self.update)
 
     def masked_text(self):
         value = self.text()
-        if len(value) <= 12:
-            return '•' * len(value)
-        return value[:8] + '…' + value[-4:]
+        return ''.join(char if i < 8 or i >= len(value) - 4 else '•'
+                       for i, char in enumerate(value))
 
     def paintEvent(self, event):
+        # Let QLineEdit draw its real editing state: dots, selection, scrolling,
+        # placeholder and blinking caret. Reveal endpoints in those same cells.
+        super().paintEvent(event)
+        if not self.text():
+            return
         option = QStyleOptionFrame()
         self.initStyleOption(option)
+        rect = self.style().subElementRect(QStyle.SE_LineEditContents, option, self).adjusted(2, 0, -2, 0)
+        password_char = chr(self.style().styleHint(QStyle.SH_LineEdit_PasswordCharacter, option, self))
+        advance = self.fontMetrics().horizontalAdvance(password_char)
+        # cursorRect includes a five-pixel margin on either side of the caret.
+        caret_x = self.cursorRect().x() + 5
+        origin = caret_x - self.cursorPosition() * advance
+        start = self.selectionStart()
+        end = start + len(self.selectedText())
         painter = QPainter(self)
-        self.style().drawPrimitive(QStyle.PE_PanelLineEdit, option, painter, self)
-        rect = self.style().subElementRect(QStyle.SE_LineEditContents, option, self).adjusted(3, 0, -3, 0)
-        palette = self.palette()
-        if self.hasSelectedText():
-            painter.fillRect(rect, palette.highlight())
-            painter.setPen(palette.highlightedText().color())
-        else:
-            painter.setPen(palette.text().color() if self.text() else palette.placeholderText().color())
         painter.setClipRect(rect)
-        painter.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft, self.masked_text() or self.placeholderText())
+        palette = self.palette()
+        for i, char in enumerate(self.text()):
+            if 8 <= i < len(self.text()) - 4:
+                continue
+            cell = QRectF(origin + i * advance, rect.top(), advance, rect.height())
+            selected = start <= i < end
+            painter.fillRect(cell, palette.highlight() if selected else palette.base())
+            painter.setPen(palette.highlightedText().color() if selected else palette.text().color())
+            painter.drawText(cell, Qt.AlignCenter, char)
+        if self.hasFocus() and not self.hasSelectedText():
+            painter.setPen(palette.text().color())
+            caret = self.cursorRect()
+            painter.drawLine(caret_x, caret.top(), caret_x, caret.bottom())
 
 
 class SubtitleWindow(QWidget):
