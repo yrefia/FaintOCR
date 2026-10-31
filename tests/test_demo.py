@@ -164,14 +164,24 @@ class DemoTests(unittest.TestCase):
         w.set_busy(True)
         token = (w.core.revision,)
         raw = json.dumps(self.module['DEMO'])
-        w.core._events.put({'kind': 'annotation', 'token': token, 'success': True,
-                            'partial': True, 'data': (raw[:-2], None), 'elapsed': .1})
+        def publish(event):
+            text, reason = event['data']
+            event['document'] = core.parse_annotation(w.core.document['source'], text, partial=bool(event.get('partial')))
+            event['finish_reason'] = reason
+            w.core._publish_annotation(event)
+        publish({'kind': 'annotation', 'token': token, 'success': True,
+                            'partial': True, 'data': (raw[:raw.index(', "annotations"')], None), 'elapsed': .1})
         w.poll()
         self.assertTrue(w.busy)
         self.assertTrue(w.core.annotation_pending)
         self.assertEqual(len(w.items), 6)
         self.assertIn('流式标注中', w.status.text())
-        w.core._events.put({'kind': 'annotation', 'token': token, 'success': True,
+        with patch.object(w, 'render', wraps=w.render) as render:
+            with patch.object(w.subtitle.view, 'relayout', wraps=w.subtitle.view.relayout) as layout:
+                w.show_document(dict(w.core.document, raw=w.core.document['raw'] + ' '))
+                render.assert_not_called()
+                layout.assert_not_called()
+        publish({'kind': 'annotation', 'token': token, 'success': True,
                             'data': (raw, 'stop'), 'elapsed': .2})
         w.poll()
         self.assertFalse(w.busy)

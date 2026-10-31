@@ -185,6 +185,74 @@ def decoded_boundaries(raw, start, end):
     return positions
 
 
+def decode_json_prefix(raw):
+    """Read only received JSON values, retaining closed fields in open containers.
+
+    Strings (including escaped quotes and Unicode escapes) are decoded atomically.
+    Locations always address the original input; no closing syntax is fabricated.
+    """
+    decoder, locations = json.JSONDecoder(), {}
+    def skip(pos):
+        while pos < len(raw) and raw[pos].isspace():
+            pos += 1
+        return pos
+    def read(pos, path):
+        pos = skip(pos)
+        start = pos
+        if pos >= len(raw):
+            return None, pos, False
+        opening = raw[pos]
+        if opening not in '{[':
+            try:
+                value, end = decoder.raw_decode(raw, pos)
+            except (ValueError, RecursionError):
+                return None, pos, False
+            locations[path] = (start, end)
+            return value, end, True
+        mapping = opening == '{'
+        result = {} if mapping else []
+        closing = '}' if mapping else ']'
+        pos = skip(pos + 1)
+        if pos < len(raw) and raw[pos] == closing:
+            locations[path] = (start, pos + 1)
+            return result, pos + 1, True
+        while pos < len(raw):
+            if mapping:
+                try:
+                    key, end = decoder.raw_decode(raw, pos)
+                except (ValueError, RecursionError):
+                    break
+                if not isinstance(key, str):
+                    break
+                pos = skip(end)
+                if pos >= len(raw) or raw[pos] != ':':
+                    break
+                pos = skip(pos + 1)
+            else:
+                key = len(result)
+            value, end, complete = read(pos, path + (key,))
+            if complete or isinstance(value, (dict, list)):
+                if mapping:
+                    result[key] = value
+                else:
+                    result.append(value)
+            if not complete:
+                break
+            pos = skip(end)
+            if pos < len(raw) and raw[pos] == closing:
+                locations[path] = (start, pos + 1)
+                return result, pos + 1, True
+            if pos >= len(raw) or raw[pos] != ',':
+                break
+            pos = skip(pos + 1)
+        return result, pos, False
+    try:
+        value, _, _ = read(0, ())
+    except RecursionError:
+        return None, {}
+    return value, locations
+
+
 def decode_best_effort(raw):
     """Read complete JSON values; salvage complete sentences, never invent missing text.
 
@@ -246,7 +314,7 @@ def decode_best_effort(raw):
     return None,{},[initial,notice('没有可恢复的完整 JSON 标注，显示本次原文。',0,len(raw))]
 
 
-def resolve_items(value, text, issues=None) -> 'list[Item]':
+def resolve_items(value, text, issues=None, *, preview=False) -> 'list[Item]':
     """Recover independently locatable annotations; never invent missing boundaries."""
     issues = issues if issues is not None else []
     def warn(message, path=(), position=None, identity=''):
@@ -279,6 +347,8 @@ def resolve_items(value, text, issues=None) -> 'list[Item]':
         cursor = max(cursor,offset+len(source))
         if not isinstance(markup,str):
             note('缺少有效 annotated，已跳过此句。'); continue
+        if records is None and preview:
+            records = []
         if not isinstance(records,list):
             note('annotations 不是数组，已跳过此句。','annotations'); continue
         attrs, duplicate = {}, set()
@@ -335,17 +405,22 @@ def resolve_items(value, text, issues=None) -> 'list[Item]':
             layer=identity[0]; counts[layer]+=1
             if int(identity[1:]) != counts[layer]:
                 note('编号未按层从 1 连续递增，已按实际标签定位。',position=starts[identity],identity=identity)
-            if identity not in attrs:
+            if identity not in attrs and not preview:
                 note('缺少属性记录，已跳过该 ID。',position=starts[identity],identity=identity); continue
             if identity in invalid or identity in duplicate: continue
-            record,rp=attrs[identity]; local=spans.get(identity,[])
+            local=spans.get(identity,[])
             if not local: continue
+            pending = identity not in attrs
+            record,rp=attrs.get(identity, ({'id': identity}, path + ('annotated',)))
             category,canonical=record.get('category'),record.get('canonical')
+            if pending:
+                category = '属性接收中'
+                canonical = ' / '.join(source[a:b] for a,b in local)
             if not isinstance(canonical,str) or not canonical.strip():
                 warn('canonical 缺失，已跳过该 ID。',rp,identity=identity); continue
             if not isinstance(category,str) or not category.strip():
                 warn('category 缺失，已跳过该 ID。',rp,identity=identity); continue
-            if category not in TAG_CATEGORIES[layer]:
+            if not pending and category not in TAG_CATEGORIES[layer]:
                 warn(f'未知子类 {category}，保留原值显示，请核对分类依据。',rp,identity=identity)
             if layer != 'S' and len(local)>1:
                 note('word/expression 使用了多个片段，已保留实际范围，请核对。',position=starts[identity],identity=identity)
@@ -362,7 +437,7 @@ def resolve_items(value, text, issues=None) -> 'list[Item]':
             ranges=[(offset+a,offset+b) for a,b in local]
             annotation=dict(record,sentence_index=index+1,source=source,
                             spans=[{'text':text[a:b],'start':a,'end':b} for a,b in ranges])
-            resolved.append({'category':LAYER_KEYS[layer],
+            resolved.append({**({'metadata_pending': True} if pending else {}), 'category':LAYER_KEYS[layer],
                              'base':[category],'unit':canonical,'ranges':ranges,'subtype':category,'annotation':annotation,'json_path':rp})
     if text[cursor:].strip(): warn('返回句子未覆盖原文末尾，可用标注已保留。',('sentences',))
     return resolved
@@ -523,9 +598,19 @@ class Document(TypedDict):
     locations: dict[tuple, tuple[int, int]]  # JSON 值路径 -> 返回文本中的 [start, end)
 
 
-def parse_annotation(source, raw) -> Document:
-    value, locations, warnings = decode_best_effort(raw)
-    items = resolve_items(value, source, warnings) if value is not None else []
+def parse_annotation(source, raw, *, partial=False) -> Document:
+    if partial:
+        value, locations = decode_json_prefix(raw)
+        warnings = []
+        # An open record is not metadata yet; keep only completely received records.
+        if isinstance(value, dict) and isinstance(value.get('sentences'), list):
+            for index, group in enumerate(value['sentences']):
+                if isinstance(group, dict) and isinstance(group.get('annotations'), list):
+                    group['annotations'] = [record for ri, record in enumerate(group['annotations'])
+                                            if ('sentences', index, 'annotations', ri) in locations]
+    else:
+        value, locations, warnings = decode_best_effort(raw)
+    items = resolve_items(value, source, warnings, preview=partial) if value is not None else []
     return {'source': source, 'items': items, 'warnings': warnings,
             'raw': raw, 'locations': locations}
 
@@ -604,7 +689,7 @@ class PromptFile:
 class LearningCore:
     """One document session. Call public methods and poll() on one owner thread.
 
-    Daemon workers only do transport/decoding and enqueue values. They never touch
+    Daemon workers do transport and parse immutable document snapshots. They never touch
     widgets or session state. poll() applies current-revision results and caches.
     Transport is injectable as transport(key, payload) -> response body for tests.
     """
@@ -619,10 +704,14 @@ class LearningCore:
         self.annotation_pending = False
         self._annotation_signature = None
         self._events = queue.Queue()
+        self._snapshot_lock = threading.Lock()
+        self._latest_annotation = None
         self._closed = False
 
     def reset(self):
-        self.revision += 1
+        with self._snapshot_lock:
+            self.revision += 1
+            self._latest_annotation = None
         self.explanation_cache.clear()
         self.explanation_pending.clear()
         self.selected_explanation = None
@@ -652,16 +741,27 @@ class LearningCore:
         self.document = parse_annotation(source, raw)
         return self.document
 
+    def _publish_annotation(self, event):
+        """One bounded mailbox: newer snapshots replace undisplayed older ones."""
+        with self._snapshot_lock:
+            if self._closed or event['token'][0] != self.revision:
+                return
+            self._latest_annotation = event
+
     def _launch(self, kind, token, key, payload):
         snapshot = copy.deepcopy(payload)
+        source = self.document['source']
         def run():
+            latest_document = None
             started = time.monotonic()
             try:
                 if kind == 'annotation' and self.transport is request_annotations:
                     def progress(raw):
+                        nonlocal latest_document
                         if self._closed or token[0] != self.revision:
                             raise ValueError('请求已取消。')
-                        self._events.put({'kind': kind, 'token': token, 'success': True,
+                        latest_document = parse_annotation(source, raw.replace('\r\n', '\n').replace('\r', '\n'), partial=True)
+                        self._publish_annotation({'document': latest_document, 'finish_reason': None, 'kind': kind, 'token': token, 'success': True,
                                           'partial': True, 'data': (raw, None),
                                           'elapsed': time.monotonic() - started})
                     body = self.transport(key, snapshot, on_delta=progress)
@@ -672,13 +772,20 @@ class LearningCore:
                 else:
                     data = parse_explanation(body)
                 event = {'kind':kind, 'token':token, 'success':True, 'data':data}
+                if kind == 'annotation':
+                    latest_document = parse_annotation(source, data[0].replace('\r\n', '\n').replace('\r', '\n'))
+                    event['finish_reason'] = data[1]
             except Exception as exc:
                 message = str(exc) if isinstance(exc,ValueError) else '请求或响应读取失败，请重试。'
                 if key:
                     message = message.replace(key, '[API Key]')
                 event = {'kind':kind, 'token':token, 'success':False, 'data':message}
             event['elapsed'] = time.monotonic()-started
-            self._events.put(event)
+            if kind == 'annotation':
+                event['document'] = latest_document
+                self._publish_annotation(event)
+            else:
+                self._events.put(event)
         threading.Thread(target=run, daemon=True).start()
 
     def annotate(self, source, prompt, model, *, key=None):
@@ -699,6 +806,8 @@ class LearningCore:
         self._ensure_open()
         if not 0 <= number < len(self.document['items']):
             raise ValueError('请选择有效标注。')
+        if self.document['items'][number].get('metadata_pending'):
+            return {'state': 'pending', 'text': '标注属性接收中…', 'payload': None}
         token = (self.revision, number, prompt, model)
         self.selected_explanation = token
         if token in self.explanation_cache:
@@ -713,28 +822,33 @@ class LearningCore:
 
     def poll(self):
         events = []
-        while True:
+        with self._snapshot_lock:
+            latest = self._latest_annotation
+            self._latest_annotation = None
+        if latest is not None:
+            events.append(latest)
+        # Bound this tick to events already available; new work waits for the next tick.
+        for _ in range(self._events.qsize()):
             try:
-                event = self._events.get_nowait()
+                events.append(self._events.get_nowait())
             except queue.Empty:
                 break
+        accepted = []
+        for event in events:
             token = event['token']
             if self._closed or token[0] != self.revision:
                 continue
             if event['kind'] == 'annotation':
                 self.annotation_pending = bool(event.get('partial'))
-                if event['success']:
-                    raw, reason = event['data']
-                    self.document = parse_annotation(self.document['source'], raw)
-                    event['document'] = self.document
-                    event['finish_reason'] = reason
+                if event.get('document') is not None:
+                    self.document = event['document']
             else:
                 self.explanation_pending.discard(token)
                 if event['success']:
                     self.explanation_cache[token] = event['data']
                 event['selected'] = token == self.selected_explanation
-            events.append(event)
-        return events
+            accepted.append(event)
+        return accepted
 
     def close(self):
         self.reset()

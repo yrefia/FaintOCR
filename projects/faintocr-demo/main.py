@@ -536,10 +536,12 @@ class AnnotationWindow(QWidget):
         self.show_document(result, label)
 
     def show_document(self, result, label='解析完成'):
+        changed = self.source != result['source'] or self.items != result['items']
         self.source, self.items = result['source'], result['items']
         self.rendered_raw, self.rendered_locations = result['raw'], result['locations']
-        self.render()
-        self.show_subtitle()
+        if changed:
+            self.render()
+            self.show_subtitle()
         self.clear_errors()
         issues = result['warnings']
         if issues:
@@ -623,22 +625,19 @@ class AnnotationWindow(QWidget):
                 continue
             partial = event.get('partial', False)
             self.set_busy(partial)
-            if event['success']:
+            if event.get('document') is not None:
                 result = event['document']
                 self.raw.setPlainText(result['raw'])
-                # QTextDocument normalizes line endings; reindex only if that changed raw coordinates.
-                if self.raw.toPlainText() != result['raw']:
-                    result = core.parse_annotation(result['source'], self.raw.toPlainText())
                 phase = '流式标注中' if partial else '返回解析'
                 self.show_document(result, f"{phase} · {event['elapsed']:.1f} 秒")
-                reason = event['finish_reason']
+                reason = event.get('finish_reason')
                 if reason == 'length':
                     self.status.setText(
                         self.status.text() + ' · 提醒：输出达到 token 上限，后面的句子可能缺少标注；请缩短原文后重试。'
                     )
                 elif reason not in (None, 'stop'):
                     self.status.setText(self.status.text() + f' · 提醒：响应未正常结束（{reason}），请检查完整性。')
-            else:
+            if not event['success']:
                 self.status.setText('请求提醒：' + event['data'] + '；已保留本次原文及已接收标注，结果可能不完整。')
 
     def closeEvent(self, event):

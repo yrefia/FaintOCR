@@ -42,8 +42,13 @@ class AnnotatedTextView(QWidget):
         self.relayout()
 
     def set_content(self, source, items, enabled=None):
+        layers = set(LAYERS) if enabled is None else set(enabled)
+        geometry = lambda values: [(item['category'], item['ranges']) for item in values]
+        if source == self.source and layers == self.enabled and geometry(items) == geometry(self.items):
+            self.items = items
+            return
         self.source, self.items = source, items
-        self.enabled = set(LAYERS) if enabled is None else set(enabled)
+        self.enabled = layers
         self.hovered = None
         self.lift_animation.stop()
         self.lift = self.scroll = 0
