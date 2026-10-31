@@ -270,7 +270,7 @@ def decode_best_effort(raw):
             value={'sentences':value}
             locations={('sentences',)+p:bounds for p,bounds in locations.items()}
             issues.append(notice('顶层为数组，已作为 sentences 读取。',start,end))
-        elif isinstance(value,dict) and {'source','annotated','annotations'} <= value.keys():
+        elif isinstance(value,dict) and {'annotated','annotations'} <= value.keys():
             value={'sentences':[value]}
             locations={('sentences',0)+p:bounds for p,bounds in locations.items()}
             issues.append(notice('顶层为单句对象，已作为一个句子读取。',start,end))
@@ -303,7 +303,7 @@ def decode_best_effort(raw):
                 try: candidate,end=decoder.raw_decode(raw,cursor)
                 except (ValueError,RecursionError):
                     cursor+=1; continue
-                if isinstance(candidate,dict) and {'source','annotated','annotations'} <= candidate.keys():
+                if isinstance(candidate,dict) and {'annotated','annotations'} <= candidate.keys():
                     index=len(groups);groups.append(candidate)
                     for path,(a,b) in json_locations(raw[cursor:end]).items():
                         locations[('sentences',index)+path]=(cursor+a,cursor+b)
@@ -330,12 +330,18 @@ def resolve_items(value, text, issues=None, *, preview=False) -> 'list[Item]':
         if not isinstance(group,dict):
             warn(f'第 {index+1} 句不是对象，已跳过。',path); continue
         source, markup, records = (group.get(k) for k in ('source','annotated','annotations'))
+        inferred_source = 'source' not in group
+        if inferred_source and isinstance(markup, str):
+            source = TAG_RE.sub('', markup)
         if not isinstance(source,str) or not source:
             note('缺少有效 source，已跳过。','source'); continue
         # Prefer the next exact source position; fallback only when unambiguous.
         offset = cursor
         if not text.startswith(source,offset):
             while offset < len(text) and text[offset].isspace(): offset += 1
+        if not text.startswith(source,offset) and inferred_source:
+            note('移除标签后的 annotated 与原文当前位置不一致（可能改写、遗漏或原文含标签），已跳过此句。')
+            continue
         if not text.startswith(source,offset):
             matches = [m.start() for m in re.finditer('(?='+re.escape(source)+')',text)]
             later = [p for p in matches if p >= cursor]

@@ -25,6 +25,30 @@ def publish(session, event):
 
 
 class StreamingTests(unittest.TestCase):
+    def test_sourceless_stream_and_repeated_sentences(self):
+        sentence = {'annotated': '<#W1>Hello</#W1>.',
+                    'annotations': [{'id': 'W1', 'category': 'Beyond Top 2000', 'canonical': 'hello'}]}
+        source = 'Hello. Hello.'
+        raw = json.dumps({'sentences': [sentence, sentence]})
+        items = core.parse_annotation(source, raw)['items']
+        self.assertEqual([item['ranges'] for item in items], [[(0, 5)], [(7, 12)]])
+        self.assertEqual([item['annotation']['source'] for item in items], ['Hello.', 'Hello.'])
+        partial = '{"sentences":[{"annotated":"<#W1>Hello</#W1>."'
+        [item] = core.parse_annotation(source, partial, partial=True)['items']
+        self.assertTrue(item['metadata_pending'])
+        self.assertEqual(item['ranges'], [(0, 5)])
+        # Complete sentences are recoverable even if the enclosing array is truncated.
+        self.assertEqual(core.parse_annotation(source, raw[:-2])['items'], items)
+
+    def test_sourceless_does_not_guess_original_text(self):
+        sentence = {'annotated': '<#W1>Hello</#W1>.',
+                    'annotations': [{'id': 'W1', 'category': 'Beyond Top 2000', 'canonical': 'hello'}]}
+        raw = json.dumps({'sentences': [sentence]})
+        for source in ('Hallo.', 'Missing. Hello.', '<#W1>Hello</#W1>.'):
+            result = core.parse_annotation(source, raw)
+            self.assertEqual(result['items'], [])
+            self.assertTrue(result['warnings'])
+
     def test_mailbox_keeps_only_latest_and_poll_never_parses(self):
         session = core.LearningCore()
         session.set_text('Hello.')
