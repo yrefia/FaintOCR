@@ -45,60 +45,48 @@ from PySide6.QtWidgets import (
     QComboBox,
     QTextBrowser,
     QMessageBox,
-    QStyle,
-    QStyleOptionFrame,
+    QToolButton,
 )
 
 DEMO_TITLE = 'FaintOCR Demo 5.5.0'
 
 
 class ApiKeyEdit(QLineEdit):
-    """Keep the full editable value while painting only its visible endpoints."""
+    """Native password editing with an explicit reveal toggle."""
 
     def __init__(self):
         super().__init__()
         self.setEchoMode(QLineEdit.Password)
         self.setPlaceholderText('请输入 API Key')
-        self.setToolTip('前 8 位和后 4 位可见，其余字符逐位显示圆点；支持直接编辑。')
-        self.textChanged.connect(self.update)
-        self.selectionChanged.connect(self.update)
+        self.setAccessibleName('DeepSeek API Key')
+        self.setMinimumSize(240, 34)
+        self.setTextMargins(8, 0, 54, 0)
+        self.visibility_button = QToolButton(self)
+        self.visibility_button.setText('显示')
+        self.visibility_button.setAccessibleName('显示 API Key')
+        self.visibility_button.setToolTip('显示 API Key')
+        self.visibility_button.setCheckable(True)
+        self.visibility_button.setAutoRaise(True)
+        self.visibility_button.setCursor(Qt.PointingHandCursor)
+        self.visibility_button.toggled.connect(self.set_key_visible)
 
-    def masked_text(self):
-        value = self.text()
-        return ''.join(char if i < 8 or i >= len(value) - 4 else '•'
-                       for i, char in enumerate(value))
-
-    def paintEvent(self, event):
-        # Let QLineEdit draw its real editing state: dots, selection, scrolling,
-        # placeholder and blinking caret. Reveal endpoints in those same cells.
-        super().paintEvent(event)
-        if not self.text():
-            return
-        option = QStyleOptionFrame()
-        self.initStyleOption(option)
-        rect = self.style().subElementRect(QStyle.SE_LineEditContents, option, self).adjusted(2, 0, -2, 0)
-        password_char = chr(self.style().styleHint(QStyle.SH_LineEdit_PasswordCharacter, option, self))
-        advance = self.fontMetrics().horizontalAdvance(password_char)
-        # cursorRect includes a five-pixel margin on either side of the caret.
-        caret_x = self.cursorRect().x() + 5
-        origin = caret_x - self.cursorPosition() * advance
+    def set_key_visible(self, visible):
+        position = self.cursorPosition()
         start = self.selectionStart()
-        end = start + len(self.selectedText())
-        painter = QPainter(self)
-        painter.setClipRect(rect)
-        palette = self.palette()
-        for i, char in enumerate(self.text()):
-            if 8 <= i < len(self.text()) - 4:
-                continue
-            cell = QRectF(origin + i * advance, rect.top(), advance, rect.height())
-            selected = start <= i < end
-            painter.fillRect(cell, palette.highlight() if selected else palette.base())
-            painter.setPen(palette.highlightedText().color() if selected else palette.text().color())
-            painter.drawText(cell, Qt.AlignCenter, char)
-        if self.hasFocus() and not self.hasSelectedText():
-            painter.setPen(palette.text().color())
-            caret = self.cursorRect()
-            painter.drawLine(caret_x, caret.top(), caret_x, caret.bottom())
+        length = len(self.selectedText())
+        self.setEchoMode(QLineEdit.Normal if visible else QLineEdit.Password)
+        if start >= 0:
+            self.setSelection(start + length, -length) if position == start else self.setSelection(start, length)
+        else:
+            self.setCursorPosition(position)
+        label = '隐藏' if visible else '显示'
+        self.visibility_button.setText(label)
+        self.visibility_button.setToolTip(label + ' API Key')
+        self.visibility_button.setAccessibleName(label + ' API Key')
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.visibility_button.setGeometry(self.width() - 50, 3, 46, self.height() - 6)
 
 
 class SubtitleWindow(QWidget):

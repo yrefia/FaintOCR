@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QMessageBox, QLineEdit
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'packages'))
 from ia_learning_core import core, PROMPT_ROOT
@@ -219,9 +219,9 @@ class DemoTests(unittest.TestCase):
     def test_key_startup_mask_and_no_fallback(self):
         w = self.window
         self.assertEqual(w.key.text(), 'startup-test-key-1234')
-        self.assertEqual(w.key.masked_text(), 'startup-' + '•' * 9 + '1234')
+        self.assertEqual(w.key.echoMode(), QLineEdit.Password)
         w.key.setText('short')
-        self.assertEqual(w.key.masked_text(), 'short')
+        self.assertNotEqual(w.key.displayText(), 'short')
         w.key.clear()
         w.english.setPlainText(self.module['SAMPLE'])
         with patch.object(core, 'load_deepseek_api_key', side_effect=AssertionError('No reload')):
@@ -243,7 +243,7 @@ class DemoTests(unittest.TestCase):
         edit.setCursorPosition(10)
         QTest.keyClicks(edit, 'AB')
         self.assertEqual(edit.text(), 'abcdefgh12AB34567890wxyz')
-        self.assertEqual(len(edit.masked_text()), len(edit.text()))
+        self.assertEqual(len(edit.displayText()), len(edit.text()))
         edit.setSelection(8, 4)
         QTest.keyClicks(edit, 'Z')
         self.assertEqual(edit.text(), 'abcdefghZ34567890wxyz')
@@ -252,6 +252,32 @@ class DemoTests(unittest.TestCase):
         edit.selectAll()
         QTest.keyClick(edit, Qt.Key_Delete)
         self.assertEqual(edit.text(), '')
+
+    def test_key_visibility_toggle_preserves_editing(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        edit = self.window.key
+        secret = 'abcdefgh1234567890wxyz'
+        edit.setText(secret)
+        edit.setSelection(8, 4)
+        self.assertEqual(edit.echoMode(), QLineEdit.Password)
+        QTest.mouseClick(edit.visibility_button, Qt.LeftButton)
+        self.assertEqual(edit.echoMode(), QLineEdit.Normal)
+        self.assertEqual(edit.displayText(), secret)
+        self.assertEqual(edit.selectedText(), '1234')
+        self.assertEqual(edit.visibility_button.text(), '隐藏')
+        QTest.mouseClick(edit.visibility_button, Qt.LeftButton)
+        self.assertEqual(edit.echoMode(), QLineEdit.Password)
+        self.assertEqual(edit.selectedText(), '1234')
+        self.assertEqual(edit.text(), secret)
+        self.assertNotEqual(edit.displayText(), secret)
+        self.assertEqual(edit.visibility_button.text(), '显示')
+        edit.setText('x' * 120)
+        edit.setCursorPosition(60)
+        QTest.mouseClick(edit.visibility_button, Qt.LeftButton)
+        self.assertEqual(edit.cursorPosition(), 60)
+        self.assertEqual(edit.text(), 'x' * 120)
+        self.assertFalse(edit.grab().isNull())
 
     def test_editor_save_reload_conflict_and_cancel(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
