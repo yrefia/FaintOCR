@@ -84,8 +84,10 @@ class DemoTests(unittest.TestCase):
         explanation = (PROMPT_ROOT / 'explanation.txt').read_text(encoding='utf-8-sig')
         # 唯一有意的差异：标注输出预算从 5.4.3 的 8192 放宽，避免长文被截断。
         payload = core.build_payload(source, annotation, 'deepseek-chat')
+        self.assertTrue(payload.pop('stream'))
         self.assertEqual(payload.pop('max_tokens'), core.ANNOTATION_MAX_TOKENS)
         reference = ref['build_payload'](source, annotation, 'deepseek-chat')
+        self.assertFalse(reference.pop('stream'))
         self.assertEqual(reference.pop('max_tokens'), 8192)
         self.assertEqual(payload, reference)
         for item in expected:
@@ -154,6 +156,27 @@ class DemoTests(unittest.TestCase):
         start = text.index('x')
         self.module['select_range'](w.raw, start, start + 1)
         self.assertEqual(w.raw.textCursor().selectedText(), 'x')
+
+    def test_streaming_preview_stays_busy_until_terminal_event(self):
+        w = self.window
+        w.core.set_text(self.module['SAMPLE'])
+        w.core.annotation_pending = True
+        w.set_busy(True)
+        token = (w.core.revision,)
+        raw = json.dumps(self.module['DEMO'])
+        w.core._events.put({'kind': 'annotation', 'token': token, 'success': True,
+                            'partial': True, 'data': (raw[:-2], None), 'elapsed': .1})
+        w.poll()
+        self.assertTrue(w.busy)
+        self.assertTrue(w.core.annotation_pending)
+        self.assertEqual(len(w.items), 6)
+        self.assertIn('流式标注中', w.status.text())
+        w.core._events.put({'kind': 'annotation', 'token': token, 'success': True,
+                            'data': (raw, 'stop'), 'elapsed': .2})
+        w.poll()
+        self.assertFalse(w.busy)
+        self.assertFalse(w.core.annotation_pending)
+        self.assertEqual(len(w.items), 6)
 
     def test_mock_annotation_explanation_cache_and_failure(self):
         w = self.window

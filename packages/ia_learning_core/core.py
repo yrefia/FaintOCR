@@ -109,7 +109,7 @@ def compose_annotation_payload(english, prompt, model):
     return {"model": model.strip(), "messages": [
         {"role": "system", "content": prompt},
         {"role": "user", "content": json.dumps({"english": english}, ensure_ascii=False)},
-    ], "thinking": {"type": "disabled"}, "stream": False,
+    ], "thinking": {"type": "disabled"}, "stream": True,
         "response_format": {"type": "json_object"}, "max_tokens": ANNOTATION_MAX_TOKENS}
 
 
@@ -418,6 +418,7 @@ def compose_explanation_payload(source, item, prompt, model):
     annotation = None if item is None else item['annotation']
     payload['messages'][1]['content'] = json.dumps({'english': source, 'annotation': annotation}, ensure_ascii=False)
     payload['response_format'] = {'type':'json_object'}
+    payload['stream'] = False
     payload['max_tokens'] = 768
     return payload
 
@@ -438,12 +439,54 @@ def parse_explanation(body):
     return value['explanation']
 
 
-def request_annotations(key, payload):
+def read_annotation_stream(response, on_delta=None):
+    """Read SSE events; expose every content delta and require an explicit end."""
+    parts, fields, reason = [], [], None
+    def events():
+        for line in response:
+            line = line.decode('utf-8').rstrip('\r\n')
+            if not line:
+                if fields:
+                    yield '\n'.join(fields)
+                    fields.clear()
+            elif line.startswith('data:'):
+                fields.append(line[5:].lstrip(' '))
+        if fields:
+            yield '\n'.join(fields)
+    for data in events():
+        if data == '[DONE]':
+            if reason is None:
+                raise ValueError('流式响应缺少结束原因。')
+            return json.dumps({'choices': [{'message': {'content': ''.join(parts)},
+                                           'finish_reason': reason}]}, ensure_ascii=False)
+        raise_api_error(data)
+        try:
+            value = json.loads(data)
+            for choice in value.get('choices', []):
+                if choice.get('index', 0) != 0:
+                    continue
+                delta = choice.get('delta', {}).get('content')
+                if delta is not None and not isinstance(delta, str):
+                    raise ValueError('流式文本格式无效。')
+                if delta:
+                    parts.append(delta)
+                    if on_delta:
+                        on_delta(''.join(parts))
+                if choice.get('finish_reason') is not None:
+                    reason = choice['finish_reason']
+        except (KeyError, TypeError, AttributeError, json.JSONDecodeError) as exc:
+            raise ValueError('流式响应格式无效。') from exc
+    raise ValueError('流式响应意外中断；已接收内容不完整，请重试。')
+
+
+def request_annotations(key, payload, on_delta=None):
     request = urllib.request.Request(API_URL,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"}, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
+            if payload.get('stream'):
+                return read_annotation_stream(response, on_delta)
             return response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         hints = {400: "参数错误", 401: "密钥无效", 402: "余额不足", 429: "请求过于频繁", 503: "服务繁忙"}
@@ -614,7 +657,16 @@ class LearningCore:
         def run():
             started = time.monotonic()
             try:
-                body = self.transport(key, snapshot)
+                if kind == 'annotation' and self.transport is request_annotations:
+                    def progress(raw):
+                        if self._closed or token[0] != self.revision:
+                            raise ValueError('请求已取消。')
+                        self._events.put({'kind': kind, 'token': token, 'success': True,
+                                          'partial': True, 'data': (raw, None),
+                                          'elapsed': time.monotonic() - started})
+                    body = self.transport(key, snapshot, on_delta=progress)
+                else:
+                    body = self.transport(key, snapshot)
                 if kind == 'annotation':
                     data = extract_choice(body)
                 else:
@@ -670,7 +722,7 @@ class LearningCore:
             if self._closed or token[0] != self.revision:
                 continue
             if event['kind'] == 'annotation':
-                self.annotation_pending = False
+                self.annotation_pending = bool(event.get('partial'))
                 if event['success']:
                     raw, reason = event['data']
                     self.document = parse_annotation(self.document['source'], raw)

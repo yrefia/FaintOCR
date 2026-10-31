@@ -8,6 +8,13 @@
 
 ## 安装
 
+标注请求默认使用 SSE 流式传输；每个非空内容增量通过 `poll()` 产生
+`partial=True` 的标注事件，并尝试从累计 JSON 中恢复完整句子、更新可用标注。
+不补猜未完成的 JSON 字段。宿主必须保持生成状态，直到收到最终成功或失败事件；
+断流时保留预览，但提示结果不完整。解释请求仍使用非流式 JSON。
+默认传输支持 `request_annotations(key, payload, on_delta=callback)`，回调接收累计文本；
+原有注入的双参数 transport 仍返回完整响应体。旧 revision 的增量和终态均被丢弃。
+
 工作区提供 `pyproject.toml`（setuptools 后端），包目录为 `packages/`，提示词通过 `package-data` 随包分发：
 
 ```powershell

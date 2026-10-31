@@ -621,14 +621,16 @@ class AnnotationWindow(QWidget):
                 if event['selected']:
                     self.display_explanation(event['token'][1], event['data'], reveal=False)
                 continue
-            self.set_busy(False)
+            partial = event.get('partial', False)
+            self.set_busy(partial)
             if event['success']:
                 result = event['document']
                 self.raw.setPlainText(result['raw'])
                 # QTextDocument normalizes line endings; reindex only if that changed raw coordinates.
                 if self.raw.toPlainText() != result['raw']:
-                    result = self.core.apply_json(result['source'], self.raw.toPlainText())
-                self.show_document(result, f"返回解析 · {event['elapsed']:.1f} 秒")
+                    result = core.parse_annotation(result['source'], self.raw.toPlainText())
+                phase = '流式标注中' if partial else '返回解析'
+                self.show_document(result, f"{phase} · {event['elapsed']:.1f} 秒")
                 reason = event['finish_reason']
                 if reason == 'length':
                     self.status.setText(
@@ -637,7 +639,7 @@ class AnnotationWindow(QWidget):
                 elif reason not in (None, 'stop'):
                     self.status.setText(self.status.text() + f' · 提醒：响应未正常结束（{reason}），请检查完整性。')
             else:
-                self.status.setText('请求提醒：' + event['data'] + '；已显示本次原文。')
+                self.status.setText('请求提醒：' + event['data'] + '；已保留本次原文及已接收标注，结果可能不完整。')
 
     def closeEvent(self, event):
         unsaved = self.annotation_library.has_unsaved() or self.explanation_library.has_unsaved()
