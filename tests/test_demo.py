@@ -52,7 +52,8 @@ class DemoTests(unittest.TestCase):
         self.errors = []
         self.hook = patch.object(sys, 'excepthook', lambda *args: self.errors.append(args))
         self.hook.start()
-        self.window = self.module['AnnotationWindow']()
+        with patch.object(core, 'load_deepseek_api_key', return_value='startup-test-key-1234'):
+            self.window = self.module['AnnotationWindow']()
         self.window.show()
         self.app.processEvents()
 
@@ -168,6 +169,7 @@ class DemoTests(unittest.TestCase):
         config = Path(self.config_dir.name) / 'deepseek_api_key.json'
         config.write_text(json.dumps({'api_key': 'test-key'}), encoding='utf-8')
         w.core.config_path = config
+        w.key.setText('test-key')
         w.english.setPlainText(self.module['SAMPLE'])
         w.submit()
         self.wait_until(lambda: not w.busy)
@@ -213,6 +215,24 @@ class DemoTests(unittest.TestCase):
             w.select_item(0)
             self.wait_until(lambda: 'Override explanation' in w.details.text())
         self.assertEqual(keys, ['ui-test-key', 'ui-test-key'])
+
+    def test_key_startup_mask_and_no_fallback(self):
+        w = self.window
+        self.assertEqual(w.key.text(), 'startup-test-key-1234')
+        self.assertEqual(w.key.masked_text(), 'startup-…1234')
+        w.key.setText('short')
+        self.assertEqual(w.key.masked_text(), '•••••')
+        w.key.clear()
+        w.english.setPlainText(self.module['SAMPLE'])
+        with patch.object(core, 'load_deepseek_api_key', side_effect=AssertionError('No reload')):
+            with patch.object(w.core, 'transport') as transport:
+                w.submit()
+                self.assertFalse(w.busy)
+                self.assertIn('请输入 API Key', w.status.text())
+                w.apply_result(json.dumps(self.module['DEMO']), self.module['SAMPLE'], 'test')
+                w.select_item(0)
+                self.assertIn('请输入 API Key', w.details.text())
+                transport.assert_not_called()
 
     def test_editor_save_reload_conflict_and_cancel(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:

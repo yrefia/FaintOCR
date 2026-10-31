@@ -135,7 +135,7 @@ $env:UV_PYTHON_INSTALL_DIR = "$PWD\.python"
 4. 用户配置目录 `%APPDATA%\IA\ia-learning-core\deepseek_api_key.json`；
 5. 仓库根目录 `deepseek_api_key.json`（源码检出时的历史位置，保留兼容）。
 
-查找顺序与实现见 `core.config_candidates()`。更新密钥无需重启。缺失、格式错误或空值会在界面中提示，离线演示不需要密钥。Demo 保留密码模式密钥输入框：填写时优先使用界面密钥；留空时由核心按上述顺序解析。界面输入不会写入配置文件，核心也不会把密钥写进请求体或界面历史。
+查找顺序与实现见 `core.config_candidates()`。公共核心保留密钥回退能力；Demo 只在启动时读取本地密钥到输入框，此后请求仅使用输入框当前值，清空后不再回退。输入框只显示前 8 位和后 4 位，中间隐藏；不超过 12 位时全部遮蔽。修改输入框立即生效，修改本地配置需重启 Demo。离线演示不需要密钥，界面输入不会写入配置文件、请求体或界面历史。
 
 核心调用接口为 `annotate(source, prompt, model, key=None)` 和 `explain(number, prompt, model, key=None)`（`key` 为仅限关键字参数）；测试可通过 `LearningCore(config_path=...)` 指定临时配置，避免接触真实密钥。
 

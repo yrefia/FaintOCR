@@ -45,9 +45,44 @@ from PySide6.QtWidgets import (
     QComboBox,
     QTextBrowser,
     QMessageBox,
+    QStyle,
+    QStyleOptionFrame,
 )
 
 DEMO_TITLE = 'FaintOCR Demo 5.5.0'
+
+
+class ApiKeyEdit(QLineEdit):
+    """Keep the full editable value while painting only its visible endpoints."""
+
+    def __init__(self):
+        super().__init__()
+        self.setEchoMode(QLineEdit.Password)
+        self.setPlaceholderText('请输入 API Key')
+        self.setToolTip('仅显示前 8 位和后 4 位；Ctrl+A 后粘贴可替换完整密钥。')
+        self.textChanged.connect(self.update)
+        self.selectionChanged.connect(self.update)
+
+    def masked_text(self):
+        value = self.text()
+        if len(value) <= 12:
+            return '•' * len(value)
+        return value[:8] + '…' + value[-4:]
+
+    def paintEvent(self, event):
+        option = QStyleOptionFrame()
+        self.initStyleOption(option)
+        painter = QPainter(self)
+        self.style().drawPrimitive(QStyle.PE_PanelLineEdit, option, painter, self)
+        rect = self.style().subElementRect(QStyle.SE_LineEditContents, option, self).adjusted(3, 0, -3, 0)
+        palette = self.palette()
+        if self.hasSelectedText():
+            painter.fillRect(rect, palette.highlight())
+            painter.setPen(palette.highlightedText().color())
+        else:
+            painter.setPen(palette.text().color() if self.text() else palette.placeholderText().color())
+        painter.setClipRect(rect)
+        painter.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft, self.masked_text() or self.placeholderText())
 
 
 class SubtitleWindow(QWidget):
@@ -242,9 +277,11 @@ class AnnotationWindow(QWidget):
         self.subtitle.selected.connect(self.select_item)
         root = QVBoxLayout(self)
         top = QHBoxLayout()
-        self.key = QLineEdit()
-        self.key.setEchoMode(QLineEdit.Password)
-        self.key.setPlaceholderText('留空时使用本地配置中的密钥')
+        self.key = ApiKeyEdit()
+        try:
+            self.key.setText(core.load_deepseek_api_key())
+        except ValueError as exc:
+            self.key.setToolTip(f'启动时读取密钥失败：{exc}\n请输入 API Key；请求不会重新读取本地配置。')
         self.model = QComboBox()
         self.model.setEditable(True)
         self.model.addItems(['deepseek-flash', 'deepseek-v4-pro'])
@@ -442,7 +479,7 @@ class AnnotationWindow(QWidget):
             return
         try:
             result = self.core.explain(
-                number, self.explanation_prompt.toPlainText(), self.model.currentText(), key=self.key.text()
+                number, self.explanation_prompt.toPlainText(), self.model.currentText(), key=self.input_api_key()
             )
         except ValueError as exc:
             self.display_explanation(number, str(exc))
@@ -555,7 +592,7 @@ class AnnotationWindow(QWidget):
             return
         try:
             result = self.core.annotate(
-                self.english.toPlainText(), self.prompt.toPlainText(), self.model.currentText(), key=self.key.text()
+                self.english.toPlainText(), self.prompt.toPlainText(), self.model.currentText(), key=self.input_api_key()
             )
         except ValueError as exc:
             self.status.setText(str(exc))
@@ -567,6 +604,12 @@ class AnnotationWindow(QWidget):
         self.status.setText('正在标注…')
         if result['payload'] is not None:
             self.record_request('第一层 · 标注', result['payload'])
+
+    def input_api_key(self):
+        key = self.key.text().strip()
+        if not key:
+            raise ValueError('请输入 API Key；请求仅使用输入框中的密钥。')
+        return key
 
     def poll(self):
         for event in self.core.poll():
