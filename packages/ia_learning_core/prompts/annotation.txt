@@ -85,11 +85,11 @@
 
 | 优先级 | 大类 | 子类 | 可操作定义 | 原句上的标注与 canonical |
 |--------|------|------|------------|--------------------------|
-| 1 | A. 语气与特殊构式 | 虚拟语气 (Subjunctive) | 通过特定动词形式或句法结构，表达非真实假设、愿望、遗憾、建议或要求等。 | ① 非真实条件：<#S1>If</#S1> I <#S1>were</#S1> you, I <#S1>would</#S1> stay. → canonical：If ... were ... would ...；② 建议或要求：She <#S1>insisted that</#S1> he <#S1>be</#S1> present at the meeting. → canonical：insist that ... <BaseVerb> ... |
+| 1 | A. 语气与特殊构式 | 虚拟语气 (Subjunctive) | 通过特定动词形式或句法结构，表达非真实假设、愿望、遗憾、建议或要求等。 | ① 非真实条件：<#S1>Had I</#S1> known that the stars would one day guide me home, <#S1>I would never have</#S1> feared the darkness through which I wandered. → canonical：Had <Subject> ... <Subject> would (<Negation>) have ...；② 建议或要求：She <#S1>insisted that</#S1> he <#S1>be</#S1> present at the meeting. → canonical：insist that ... <BaseVerb> ... |
 | 2 | A. 语气与特殊构式 | 强调句 (Emphatic Constructions) | 仅包含分裂强调句 (It-cleft)。 | ① 普通强调句：<#S1>It was</#S1> Mary <#S1>who</#S1> opened the door. → canonical：It was ... who ...；② not until 强调句：<#S1>It was not until</#S1> midnight <#S1>that</#S1> he returned. → canonical：It was not until ... that ... |
 | 3 | B. 语序与成分变式 | 倒装 (Inversion) | 改变主语与谓语的常规语序，将助动词、情态动词或全部谓语置于主语之前，包括部分倒装和完全倒装。 | ① 部分倒装：<#S1>Only then did we</#S1> understand the truth. → canonical：Only <Adverbial> <Auxiliary> <Subject> ...；② 完全倒装：<#S1>On the hill stood a castle</#S1>. → canonical：<Locative> <Verb> <Subject> |
 | 4 | B. 语序与成分变式 | 省略句 (Ellipsis) | 在语法和语境允许的情况下，省去能够根据上下文或句法关系恢复的句子成分。 | ① 状语从句省略主语和 be：<#S1>When asked</#S1> about it, she remained silent. → canonical：When <PastParticiple> ...；② 并列分句省略重复谓语：<#S1>John ordered tea</#S1>, <#S1>and Mary coffee</#S1>. → canonical：<Subject> <Verb> <Object>, and <Subject> <Object> |
-| 5 | B. 语序与成分变式 | 前置 (Fronting) | 将宾语、表语、状语等成分移至非常规的前部位置，以突出信息或构成特定句式，包括让步前置。 | ① 让步前置：<#S1>Young as</#S1> he <#S1>is</#S1>, he understands a great deal. → canonical：<Adjective> as ... <Be> ...；② 宾语前置：<#S1>This book I treasure</#S1> more than any other. → canonical：<Object> <Subject> <Verb> ... |
+| 5 | B. 语序与成分变式 | 前置 (Fronting) | 将宾语、表语、状语等成分移至非常规的前部位置，以突出信息或构成特定句式，包括让步前置。 | ① 让步前置：<#S1>Young as he is</#S1>, he understands a great deal. → canonical：<Adjective> as <Subject> <Be> ...；② 宾语前置：<#S1>This book I treasure</#S1> more than any other. → canonical：<Object> <Subject> <Verb> ... |
 | 6 | C. 插入与附加结构 | 插入语 (Parentheticals) | 在句子主体中或边缘插入相对独立的成分，用于表达态度、补充说明、修正信息或组织语篇。 | ① 评注性小句：This is, <#S1>I think</#S1>, the best solution. → canonical：... I think ...；② 不定式短语：The result was, <#S1>to put it mildly</#S1>, disappointing. → canonical：... to put it mildly ... |
 
 
