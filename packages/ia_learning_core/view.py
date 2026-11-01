@@ -1,5 +1,6 @@
 """Embeddable Qt annotation view. No API calls, prompts or application window policy."""
-from PySide6.QtCore import Qt, QRectF, QPointF, QEasingCurve, QVariantAnimation, Signal
+import time
+from PySide6.QtCore import Qt, QRectF, QPointF, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QTextLayout, QTextOption, QTextCharFormat, QPainterPath
 from PySide6.QtWidgets import QWidget
 
@@ -17,7 +18,10 @@ def rgba(value, alpha=255):
 
 class AnnotatedTextView(QWidget):
     annotation_clicked = Signal(int)
-    # 文字区内边距；外壳通过 preferred_height() 取高度，不必知道这些数字。
+    blank_pressed = Signal(object)
+    blank_moved = Signal(object)
+    blank_released = Signal()
+    # 文字区内边距；preferred_height() 供宿主查询完整文本高度。
     MARGIN_X, MARGIN_TOP, MARGIN_BOTTOM = 31, 24, 42
 
     def __init__(self, parent=None):
@@ -31,13 +35,10 @@ class AnnotatedTextView(QWidget):
         self.text_layout = None
         self.rects = []
         self.content_height = 0
-        # 悬停条目在 140ms 内上浮 1px（OutCubic）。
-        self.lift_animation = QVariantAnimation(self)
-        self.lift_animation.setStartValue(0.0)
-        self.lift_animation.setEndValue(1.0)
-        self.lift_animation.setDuration(140)
-        self.lift_animation.setEasingCurve(QEasingCurve.OutCubic)
-        self.lift_animation.valueChanged.connect(self._set_lift)
+        self._blank_pressed = False
+        self.timer = QTimer(self)
+        self.timer.setInterval(16)
+        self.timer.timeout.connect(self.animate)
         self.text_font = QFont('Microsoft YaHei UI', 14, QFont.Medium)
         self.relayout()
 
@@ -50,7 +51,7 @@ class AnnotatedTextView(QWidget):
         self.source, self.items = source, items
         self.enabled = layers
         self.hovered = None
-        self.lift_animation.stop()
+        self.timer.stop()
         self.lift = self.scroll = 0
         self.relayout()
         self.update()
@@ -74,7 +75,7 @@ class AnnotatedTextView(QWidget):
     def resizeEvent(self, event):
         self.hovered = None
         self.lift = 0
-        self.lift_animation.stop()
+        self.timer.stop()
         self.relayout()
         super().resizeEvent(event)
 
@@ -190,15 +191,17 @@ class AnnotatedTextView(QWidget):
     def focus(self, number):
         if number != self.hovered:
             self.hovered, self.lift = number, 0
-            self.lift_animation.stop()
-            if number is not None:
-                self.lift_animation.start()
+            self.started = time.monotonic()
+            self.timer.start() if number is not None else self.timer.stop()
             self.update()
         self.setCursor(Qt.PointingHandCursor if number is not None else Qt.ArrowCursor)
 
 
-    def _set_lift(self, value):
-        self.lift = value
+    def animate(self):
+        progress = min(1, (time.monotonic()-self.started)/.14)
+        self.lift = 1-(1-progress)**3
+        if progress >= 1:
+            self.timer.stop()
         self.update()
 
 
@@ -214,14 +217,21 @@ class AnnotatedTextView(QWidget):
 
 
     def mouseMoveEvent(self, event):
-        self.focus(self.target_at(event.position()))
+        if self._blank_pressed:
+            self.blank_moved.emit(event.globalPosition())
+        else:
+            self.focus(self.target_at(event.position()))
 
     def mousePressEvent(self, event):
-        if event.button() != Qt.LeftButton:
-            return
-        target = self.target_at(event.position())
-        if target is not None:
-            self.annotation_clicked.emit(target)
-        elif (handle := self.window().windowHandle()) is not None:
-            # 按住空白处拖动所在窗口，交给系统完成移动。
-            handle.startSystemMove()
+        if event.button() == Qt.LeftButton:
+            target = self.target_at(event.position())
+            if target is None:
+                self._blank_pressed = True
+                self.blank_pressed.emit(event.globalPosition())
+            else:
+                self.annotation_clicked.emit(target)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self._blank_pressed:
+            self._blank_pressed = False
+            self.blank_released.emit()

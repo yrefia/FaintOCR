@@ -25,7 +25,7 @@ from ia_learning_core.core import (
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 from demo_data import SAMPLE, DEMO, DEMO_EXPLANATIONS
-from PySide6.QtCore import Qt, QRectF, QTimer, Signal
+from PySide6.QtCore import Qt, QRectF, QPointF, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QLinearGradient, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
@@ -100,27 +100,21 @@ class SubtitleWindow(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setWindowTitle(f'{DEMO_TITLE} · 字幕')
         self.resize(980, 180)
-        self.info_height = 220
+        self.drag_origin = None
+        self.info_height, self.info_visible = 220, False
         self.view = AnnotatedTextView(self)
         self.view.annotation_clicked.connect(self.selected.emit)
-        self.info = QTextBrowser()
+        self.view.blank_pressed.connect(self.start_drag)
+        self.view.blank_moved.connect(self.drag_to)
+        self.view.blank_released.connect(self.finish_drag)
+        self.info = QTextBrowser(self)
         self.info.setOpenLinks(False)
         self.info.setFont(QFont('Microsoft YaHei UI', 11))
         self.info.setStyleSheet(
             'QTextBrowser { background: transparent; color: #F5F6FA; border: 0; border-top: 1px solid rgba(230,220,255,60); padding-top: 10px; }'
         )
-        # 解释区与字幕文字左右对齐，底部给圆角边框留出位置。
-        self.info_panel = QWidget()
-        panel = QVBoxLayout(self.info_panel)
-        panel.setContentsMargins(AnnotatedTextView.MARGIN_X, 0, AnnotatedTextView.MARGIN_X, 28)
-        panel.addWidget(self.info)
-        self.info_panel.setFixedHeight(self.info_height)
-        self.info_panel.hide()
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(self.view, 1)
-        layout.addWidget(self.info_panel)
+        self.info.hide()
+        self.position_children()
 
     @property
     def source(self):
@@ -139,27 +133,36 @@ class SubtitleWindow(QWidget):
         self.visibility_changed.emit(False)
 
     def set_content(self, source, items, enabled=None):
+        self.info_visible = False
         self.info.clear()
-        self.info_panel.hide()
+        self.info.hide()
+        self.position_children()
         self.view.set_content(source, items, enabled)
         screen = self.screen().availableGeometry()
         self.resize(
-            self.width(), max(self.height(), min(max(180, self.view.preferred_height()), int(screen.height() * 0.6)))
+            self.width(),
+            max(self.height(), min(max(180, int(self.view.content_height + 66)), int(screen.height() * 0.6))),
         )
+        self.position_children()
         self.update()
 
     def show_explanation(self, number, text):
         item = self.items[number]
-        if self.info_panel.isHidden():
+        if not self.info_visible:
+            self.info_visible = True
             cap = self.screen().availableGeometry().height() - 40
             self.resize(
-                self.width(), max(self.height(), min(max(180, self.view.preferred_height()) + self.info_height, cap))
+                self.width(),
+                max(self.height(), min(max(180, int(self.view.content_height + 66)) + self.info_height, cap)),
             )
+        self.position_children()
         self.info.setPlainText(
             f"{CATEGORIES[item['category']][0]} · {item['subtype'] + ' · ' if item['subtype'] else ''}{item['unit']}\n{text}"
         )
         self.info.verticalScrollBar().setValue(0)
-        self.info_panel.show()
+        self.info.show()
+        self.view.relayout()
+        self.view.update()
 
     def closeEvent(self, event):
         self.view.focus(None)
@@ -180,6 +183,26 @@ class SubtitleWindow(QWidget):
         p.setPen(QPen(rgba('#ffffff', 28), 1))
         p.drawRoundedRect(body, 22, 22)
         p.end()
+
+    def position_children(self):
+        if not hasattr(self, 'view'):
+            return
+        self.view.setGeometry(0, 0, self.width(), self.height() - (self.info_height if self.info_visible else 0))
+        self.info.setGeometry(31, self.height() - self.info_height - 28, self.width() - 62, self.info_height)
+
+    def resizeEvent(self, event):
+        self.position_children()
+        super().resizeEvent(event)
+
+    def start_drag(self, global_position):
+        self.drag_origin = global_position - QPointF(self.pos())
+
+    def drag_to(self, global_position):
+        if self.drag_origin is not None:
+            self.move((global_position - self.drag_origin).toPoint())
+
+    def finish_drag(self):
+        self.drag_origin = None
 
 
 def confirm_discard(parent, text):

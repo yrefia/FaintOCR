@@ -134,20 +134,53 @@ class DemoTests(unittest.TestCase):
             self.app.processEvents()
             time.sleep(.01)
         self.assertEqual(view.lift, 1.0)
+        self.assertFalse(view.timer.isActive())
         view.focus(None)
         self.assertEqual(view.lift, 0)
         self.assertIsNone(view.hovered)
+
+    def test_subtitle_first_content_uses_window_width(self):
+        subtitle = self.module['SubtitleWindow']()
+        self.addCleanup(subtitle.close)
+        self.assertEqual(subtitle.view.width(), 980)
+        subtitle.set_content('A short sentence.', [])
+        self.assertEqual((subtitle.width(), subtitle.height()), (980, 180))
+        subtitle.show()
+        self.app.processEvents()
+        self.assertEqual((subtitle.width(), subtitle.height()), (980, 180))
+
+    def test_blank_drag_moves_shell_without_screen_clamping(self):
+        from PySide6.QtCore import QEvent, QPointF, Qt
+        from PySide6.QtGui import QMouseEvent
+        subtitle = self.window.subtitle
+        subtitle.show()
+        self.app.processEvents()
+        start = QPointF(subtitle.pos()) + QPointF(10, 10)
+        target = QPointF(-30, -20)
+        press = QMouseEvent(QEvent.MouseButtonPress, QPointF(10, 10), start,
+                            Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+        move = QMouseEvent(QEvent.MouseMove, QPointF(10, 10), target + QPointF(10, 10),
+                           Qt.NoButton, Qt.LeftButton, Qt.NoModifier)
+        release = QMouseEvent(QEvent.MouseButtonRelease, QPointF(10, 10), target + QPointF(10, 10),
+                              Qt.LeftButton, Qt.NoButton, Qt.NoModifier)
+        self.app.sendEvent(subtitle.view, press)
+        with patch.object(subtitle, 'move', wraps=subtitle.move) as move_shell:
+            self.app.sendEvent(subtitle.view, move)
+            move_shell.assert_called_once_with(target.toPoint())
+        self.app.sendEvent(subtitle.view, release)
+        self.assertIsNone(subtitle.drag_origin)
+        self.assertFalse(subtitle.view._blank_pressed)
 
     def test_subtitle_layout_and_utf16_selection(self):
         w, subtitle = self.window, self.window.subtitle
         w.demo()
         self.app.processEvents()
-        self.assertTrue(subtitle.info_panel.isHidden())
+        self.assertTrue(subtitle.info.isHidden())
         self.assertEqual(subtitle.view.height(), subtitle.height())
         self.assertGreaterEqual(subtitle.height(), subtitle.view.preferred_height())
         w.select_item(0)
         self.app.processEvents()
-        self.assertFalse(subtitle.info_panel.isHidden())
+        self.assertFalse(subtitle.info.isHidden())
         self.assertEqual(subtitle.view.height() + subtitle.info_height, subtitle.height())
         self.assertTrue(subtitle.info.toPlainText().strip())
         # Characters outside the BMP take two UTF-16 units in Qt; selections must still match Python indices.
