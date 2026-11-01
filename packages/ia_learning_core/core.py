@@ -332,6 +332,9 @@ def resolve_items(value, text, issues=None, *, preview=False) -> 'list[Item]':
         if not isinstance(group,dict):
             warn(f'第 {index+1} 句不是对象，已跳过。',path); continue
         source, markup, records = (group.get(k) for k in ('source','annotated','annotations'))
+        # A closed source alone is not a renderable streaming sentence.
+        if preview and not isinstance(markup, str):
+            continue
         inferred_source = 'source' not in group
         if inferred_source and isinstance(markup, str):
             source = RANGE_TAG_RE.sub('', markup)
@@ -450,7 +453,7 @@ def resolve_items(value, text, issues=None, *, preview=False) -> 'list[Item]':
                             spans=[{'text':text[a:b],'start':a,'end':b} for a,b in ranges])
             resolved.append({**({'metadata_pending': True} if pending else {}), 'category':LAYER_KEYS[layer],
                              'base':[category],'unit':canonical,'ranges':ranges,'subtype':category,'annotation':annotation,'json_path':rp})
-    if text[cursor:].strip(): warn('返回句子未覆盖原文末尾，可用标注已保留。',('sentences',))
+    if not preview and text[cursor:].strip(): warn('返回句子未覆盖原文末尾，可用标注已保留。',('sentences',))
     return resolved
 
 

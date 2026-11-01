@@ -25,6 +25,24 @@ def publish(session, event):
 
 
 class StreamingTests(unittest.TestCase):
+    def test_source_response_preserves_recovery_and_streaming(self):
+        fixture = json.loads((Path(__file__).parent / 'fixtures/missing_hash_annotation.json').read_text(encoding='utf-8'))
+        for sentence in fixture['response']['sentences']:
+            sentence['source'] = core.RANGE_TAG_RE.sub('', sentence['annotated'])
+        raw = json.dumps(fixture['response'], ensure_ascii=False)
+        for partial in (False, True):
+            doc = core.parse_annotation(fixture['input'], raw, partial=partial)
+            self.assertEqual(len(doc['items']), 30)
+            self.assertTrue(any('标签格式不规范' in str(w) for w in doc['warnings']))
+        prefix = '{"sentences":[{"source":"Hello.","annotated":'
+        waiting = core.parse_annotation('Hello.', prefix, partial=True)
+        self.assertEqual(waiting['items'], [])
+        self.assertEqual(waiting['warnings'], [])
+        ready = core.parse_annotation('Hello.', prefix + '"<#W1>Hello</W1>."', partial=True)
+        self.assertEqual(ready['items'][0]['ranges'], [(0, 5)])
+        mismatched = core.parse_annotation('Hello.', prefix + '"<#W1>World</W1>."', partial=True)
+        self.assertEqual(mismatched['items'], [])
+
     def test_real_missing_hash_response_preserves_all_six_sentences(self):
         fixture = json.loads((Path(__file__).parent / 'fixtures/missing_hash_annotation.json').read_text(encoding='utf-8'))
         raw = json.dumps(fixture['response'], ensure_ascii=False)

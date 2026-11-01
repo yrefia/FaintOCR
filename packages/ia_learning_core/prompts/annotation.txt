@@ -8,6 +8,7 @@
 {
   "sentences": [
     {
+      "source": "SOURCE",
       "annotated": "ANNOTATED",
       "annotations": [
         {
@@ -22,13 +23,14 @@
 ```
 
 - sentences：按原文顺序排列的句子数组，每句对应一个对象，按原文顺序逐句输出，不得遗漏。
-- annotated：在完整原文句子中插入 `<#ID>` 和 `</#ID>` 标签后的文本；删除所有标注标签后，必须与原文句子完全一致，保留原有文字、大小写、空格和标点，不得改写、纠错。
+- source：完整原文句子，保留原有文字、大小写、空格和标点，不得改写、纠错。
+- annotated：在 source 中插入 `<#ID>` 和 `</#ID>` 标签后的文本；删除所有标注标签后，必须与 source 完全一致。
 - annotations：该句所有标注对象的元数据。每项包含：
   - id：标注 ID。
   - category：Category.md 中对应子类的英文名称。
   - canonical：标注对象的规范形式，具体规则见下文。
 
-没有符合条件的内容时，`annotations` 返回 `[]`，`annotated` 与原文句子完全一致。
+没有符合条件的内容时，`annotations` 返回 `[]`，`annotated` 与 `source` 完全一致。
 
 # 2. 标注规则
 
@@ -42,7 +44,7 @@
 
 - 使用 <#ID>原文片段</#ID> 标记范围。每句、每层分别从 1 开始，按出现顺序编号。
 - 每个独立标注对象在 `annotations` 中恰好对应一条记录；同一 Syntax 结构的多个片段共用一条记录。
-- `annotated` 只能插入标签，不得修改、增删或重排原文字符。移除所有标签后，必须与原文句子完全一致。
+- `annotated` 只能插入标签，不得修改、增删或重排原文字符。移除所有标签后，必须与 `source` 完全一致。
 - `annotations` 按首次出现位置排列，同时出现时按 S > E > W 排序。
 - `canonical` 必须与实际标注的成分对应；原形还原和模式抽象仅写入 canonical，不得据此改写原文。
 
@@ -97,6 +99,7 @@
 {
   "sentences": [
     {
+      "source": "Only by calling our cherished assumptions into question can we approach the truth with intellectual humility.",
       "annotated": "<#S1>Only by <#E1>calling our <#W1>cherished</#W1> <#W2>assumptions</#W2> into question</#E1> can we</#S1> approach the truth with <#W3>intellectual</#W3> <#W4>humility</#W4>.",
       "annotations": [
         {
@@ -139,6 +142,7 @@
 {
   "sentences": [
     {
+      "source": "Rarely do we bring our most inchoate longings to fruition without first enduring disillusionment.",
       "annotated": "<#S1>Rarely do we</#S1> <#E1>bring our most <#W1>inchoate</#W1> <#W2>longings</#W2> to <#W3>fruition</#W3></#E1> without first <#W4>enduring</#W4> <#W5>disillusionment</#W5>.",
       "annotations": [
         {
