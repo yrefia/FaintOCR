@@ -9,7 +9,7 @@ SNAP = ROOT / 'snapshots'
 sys.path.insert(0, str(SNAP))
 
 from PySide6.QtCore import QTimer, QVariantAnimation, QEasingCurve, Qt
-from PySide6.QtGui import QPainterPath, QPainter, QTextLayout
+from PySide6.QtGui import QPainter, QTextLayout
 from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QPushButton, QComboBox, QDoubleSpinBox, QFormLayout, QSlider, QHBoxLayout, QGroupBox, QScrollArea
 from ia_learning_core import core
 
@@ -82,12 +82,14 @@ class WallClockTimer(QTimer):
             self.stop()
 
 
-def create_test(version, timing, height, curve, frames, duration, rendering="native"):
+def create_test(version, timing, height, curve, frames, duration, rendering="native", exit_curve=None):
     started = time.perf_counter()
 
     def probe(base):
         class Probe(base):
             def relayout(self):
+                if getattr(self, '_exit_driver', None) is not None:
+                    self.reset_hover()
                 super().relayout()
                 if rendering == 'outline':
                     attr = 'layout' if version == '5.4.3' else 'text_layout'
@@ -95,7 +97,51 @@ def create_test(version, timing, height, curve, frames, duration, rendering="nat
                     if current is not None:
                         setattr(self, attr, OutlineLayout(current))
 
+            def reset_hover(self):
+                if getattr(self, '_exit_driver', None) is not None:
+                    self._exit_driver.stop()
+                self._exiting = False
+                super().focus(None)
+                self.lift = 0
+                self.update()
+
+            def _exit_value(self, progress):
+                self.lift = self._exit_start * (1 - progress)
+                self.update()
+
+            def _exit_tick(self):
+                progress = min(1, (time.monotonic() - self._exit_started) / (duration / 1000))
+                self._exit_value(exit_curve.valueForProgress(progress))
+                if progress >= 1:
+                    self.reset_hover()
+
             def focus(self, number):
+                if number is None and getattr(self, '_exiting', False):
+                    return
+                if number is None and exit_curve is not None and self.hovered is not None and self.lift != 0 and duration > 0:
+                    driver = self.timer if version == '5.4.3' else self.lift_animation
+                    driver.stop()
+                    self._exit_start = self.lift
+                    self._exit_started = time.monotonic()
+                    self._exiting = True
+                    if getattr(self, '_exit_driver', None) is None:
+                        if timing == 'QTimer':
+                            self._exit_driver = QTimer(self)
+                            self._exit_driver.setInterval(16)
+                            self._exit_driver.timeout.connect(self._exit_tick)
+                        else:
+                            self._exit_driver = QVariantAnimation(self)
+                            self._exit_driver.setStartValue(0.0)
+                            self._exit_driver.setEndValue(1.0)
+                            self._exit_driver.setDuration(duration)
+                            self._exit_driver.setEasingCurve(exit_curve)
+                            self._exit_driver.valueChanged.connect(self._exit_value)
+                            self._exit_driver.finished.connect(self.reset_hover)
+                    self._exit_driver.start()
+                    self.setCursor(Qt.ArrowCursor)
+                    return
+                if getattr(self, '_exiting', False):
+                    self.reset_hover()
                 super().focus(number)
                 if duration == 0 and number is not None:
                     driver = self.timer if version == '5.4.3' else self.lift_animation
@@ -113,6 +159,7 @@ def create_test(version, timing, height, curve, frames, duration, rendering="nat
             def paintEvent(self, event):
                 frames.append({'ms': (time.perf_counter() - started) * 1000,
                                'lift': float(self.lift), 'hovered': self.hovered,
+                               'exiting': getattr(self, '_exiting', False),
                                'size': [self.width(), self.height()]})
                 super().paintEvent(event)
         return Probe
@@ -255,7 +302,15 @@ def run(version='5.4.3', timing='QTimer'):
     curves = QComboBox()
     names = ['OutCubic', 'Linear', 'InCubic', 'InOutCubic', 'OutQuad', 'OutSine', 'OutExpo', 'OutBack', 'OutBounce', 'OutElastic']
     curves.addItems(names)
-    form.addRow('缓动曲线', curves)
+    form.addRow('进入缓动', curves)
+    exit_curves = QComboBox()
+    exit_curves.addItem('无（立即复位）', None)
+    for name in names:
+        exit_curves.addItem(name, name)
+    form.addRow('退出缓动', exit_curves)
+    exit_note = QLabel('退出默认立即复位。启用后从当前高度返回原位，共用上浮时长及计时方式。\n再次进入或切换标注会取消退出，并重新播放进入动画。')
+    exit_note.setWordWrap(True)
+    animation.addWidget(exit_note)
     limits = QLabel('高度 0–300px · 时长 0–6000ms（0ms 立即到达终点）\n滑块释放后应用；切换参数会保存记录并重建悬浮窗。')
     limits.setWordWrap(True)
     animation.addWidget(limits)
@@ -270,11 +325,12 @@ def run(version='5.4.3', timing='QTimer'):
     math_section.addWidget(note)
     layout.addStretch()
     replay = QPushButton('重播 be 上浮（固定目标）')
+    leave = QPushButton('退出悬停')
     save = QPushButton('保存帧记录')
     toggle_window = QPushButton('关闭悬浮窗')
     status = QLabel()
     actions = QHBoxLayout()
-    for widget in (replay, save, toggle_window):
+    for widget in (replay, leave, save, toggle_window):
         widget.setMinimumHeight(34)
         actions.addWidget(widget)
     outer.addLayout(actions)
@@ -286,7 +342,7 @@ def run(version='5.4.3', timing='QTimer'):
         if not state:
             return
         destination = ROOT / (state['version'] + '+' + state['timing'] + '+' + state['rendering'] + '-frames.json')
-        payload = {key: state[key] for key in ('version', 'timing', 'height', 'curve', 'rendering', 'frames')}
+        payload = {key: state[key] for key in ('version', 'timing', 'height', 'curve', 'rendering', 'exit_curve', 'frames')}
         payload['duration_ms'] = state['duration']
         destination.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
         status.setText(f"已保存 {len(state['frames'])} 帧：{destination.name}")
@@ -300,11 +356,12 @@ def run(version='5.4.3', timing='QTimer'):
             state['window'].deleteLater()
         v, t = variants[versions.currentIndex()]
         frames = []
-        window, view = create_test(v, t, height.value(), QEasingCurve(getattr(QEasingCurve, curves.currentText())), frames, duration.value(), rendering.currentData())
+        window, view = create_test(v, t, height.value(), QEasingCurve(getattr(QEasingCurve, curves.currentText())), frames, duration.value(), rendering.currentData(),
+                                   QEasingCurve(getattr(QEasingCurve, exit_curves.currentData())) if exit_curves.currentData() else None)
         if position is not None:
             window.move(position)
         state.update(window=window, view=view, frames=frames, version=v, timing=t,
-                     height=height.value(), curve=curves.currentText(), duration=duration.value(), rendering=rendering.currentData())
+                     height=height.value(), curve=curves.currentText(), duration=duration.value(), rendering=rendering.currentData(), exit_curve=exit_curves.currentData())
         shell = ('5.4.3：顶层 SubtitleWindow 直接绘制文字与标注。' if v == '5.4.3'
                  else '5.5.0：SubtitleWindow 外壳 + AnnotatedTextView 子视图绘制。')
         clock = ('QTimer：16ms timeout，time.monotonic 测量经过时间，QEasingCurve 求位移。' if t == 'QTimer'
@@ -314,25 +371,29 @@ def run(version='5.4.3', timing='QTimer'):
                  '轮廓：QTextLayout 排版 → glyphRuns 保留字形与位置 → QRawFont.pathForGlyph 缓存轮廓 → QPainter.fillPath 抗锯齿绘制。静止与动画文字统一使用轮廓，保留加粗和颜色；锐利度可能不同，首次布局成本更高。背景和裁剪仍使用原实现。')
         technology.setText('<b>窗口结构</b><br>' + shell + '<br><br><b>动画计时</b><br>' + clock + '<br><br><b>文字渲染</b><br>' + paint)
         formula.setText('t∈[0,1]；上浮位移 = 高度 × f(t)\n' + FORMULAS[curves.currentText()])
+        formula.setText(formula.text() + ('\n\n退出：立即复位' if exit_curves.currentData() is None else '\n\n退出位移 = 离开时高度 × [1 − f(t)]\n' + FORMULAS[exit_curves.currentData()]))
         status.setText('当前：' + v + '+' + t)
         toggle_window.setText('关闭悬浮窗')
         replay.setEnabled(True)
+        leave.setEnabled(True)
 
     def replay_animation():
-        state['view'].focus(None)
+        state['view'].reset_hover()
         state['view'].focus(state['view'].replay_target)
 
     def toggle_floating_window():
         if state['window'].isVisible():
-            state['view'].focus(None)
+            state['view'].reset_hover()
             save_frames()
             state['window'].close()
             toggle_window.setText('打开悬浮窗')
             replay.setEnabled(False)
+            leave.setEnabled(False)
         else:
             state['window'].show()
             toggle_window.setText('关闭悬浮窗')
             replay.setEnabled(True)
+            leave.setEnabled(True)
 
     toggle_window.clicked.connect(toggle_floating_window)
     versions.currentIndexChanged.connect(rebuild)
@@ -340,6 +401,8 @@ def run(version='5.4.3', timing='QTimer'):
     duration.valueChanged.connect(rebuild)
     curves.currentIndexChanged.connect(rebuild)
     rendering.currentIndexChanged.connect(rebuild)
+    exit_curves.currentIndexChanged.connect(rebuild)
+    leave.clicked.connect(lambda: state['view'].focus(None))
     replay.clicked.connect(replay_animation)
     save.clicked.connect(save_frames)
     rebuild()
@@ -378,6 +441,29 @@ def run(version='5.4.3', timing='QTimer'):
                     target_layout = state['view'].layout if state['version'] == '5.4.3' else state['view'].text_layout
                     assert isinstance(target_layout, OutlineLayout) and target_layout.paths
                     assert any(brush is not None for _, brush in target_layout.paths)
+        duration.setValue(140)
+        for index in range(4):
+            versions.setCurrentIndex(index)
+            for curve_index in range(1, exit_curves.count()):
+                exit_curves.setCurrentIndex(curve_index)
+                app.processEvents()
+                QTest.qWait(60)
+                replay_animation()
+                QTest.qWait(220)
+                view = state['view']
+                view.focus(None)
+                assert view.hovered is not None and view.lift == 5
+                QTest.qWait(50)
+                assert getattr(view, '_exiting', False)
+                QTest.qWait(180)
+                assert view.hovered is None and view.lift == 0
+                replay_animation()
+                QTest.qWait(50)
+                view.focus(None)
+                view.focus(view.replay_target)
+                assert not view._exiting
+                view.reset_hover()
+        exit_curves.setCurrentIndex(0)
         duration.setValue(0)
         height.setValue(300)
         for index in range(4):
@@ -392,7 +478,7 @@ def run(version='5.4.3', timing='QTimer'):
         assert not state['window'].isVisible() and panel.isVisible()
         toggle_floating_window()
         assert state['window'].isVisible()
-        print('PASS: all four variants, three curves, 5px endpoint and reset')
+        print('PASS: four variants, entry/exit curves, re-entry, endpoints and reset')
         panel.close()
         return
     sys.exit(app.exec())
