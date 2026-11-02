@@ -3,13 +3,15 @@ from pathlib import Path
 import json
 import sys
 import time
+import inspect
+import textwrap
 
 ROOT = Path(__file__).resolve().parent
 SNAP = ROOT / 'snapshots'
 sys.path.insert(0, str(SNAP))
 
-from PySide6.QtCore import QTimer, QVariantAnimation, QEasingCurve, Qt
-from PySide6.QtGui import QPainter, QTextLayout
+from PySide6.QtCore import QTimer, QVariantAnimation, QEasingCurve, Qt, QPointF
+from PySide6.QtGui import QPainter, QTextLayout, QPainterPath, QColor
 from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QPushButton, QComboBox, QDoubleSpinBox, QFormLayout, QSlider, QHBoxLayout, QGroupBox, QScrollArea
 from ia_learning_core import core
 
@@ -63,33 +65,29 @@ class OutlineLayout:
         painter.restore()
 
 
-class WallClockTimer(QTimer):
-    """The old 16ms timer and monotonic-clock cubic curve."""
-    def __init__(self, owner):
-        super().__init__(owner)
-        self.owner = owner
-        self.setInterval(16)
-        self.timeout.connect(self.tick)
-
-    def start(self):
-        self.started = time.monotonic()
-        super().start()
-
-    def tick(self):
-        progress = 1 if self.duration == 0 else min(1, (time.monotonic() - self.started) / (self.duration / 1000))
-        self.owner._set_lift(self.height * self.curve.valueForProgress(progress))
-        if progress >= 1:
-            self.stop()
-
-
-def create_test(version, timing, height, curve, frames, duration, rendering="native", exit_curve=None):
+def create_test(version, timing, height, curve, frames, duration, rendering="native", exit_curve=None, exit_duration=140):
     started = time.perf_counter()
 
     def probe(base):
+        # Adapt the snapshot's decoration/shell painter without editing the snapshot.
+        source = textwrap.dedent(inspect.getsource(base.paintEvent))
+        source = source.replace('shift = -self.lift if self.hovered == number else 0',
+                                'shift = -self.lifts.get(number, 0)')
+        begin = source.index('    if self.' + ('layout' if version == '5.4.3' else 'text_layout') + ':')
+        end = source.index('    p.end()', begin)
+        source = source[:begin] + '    self._draw_moving_text(p, viewport)\n' + source[end:]
+        scope = dict(base.paintEvent.__globals__)
+        exec(compile(source, '<isolation-multiple-target-painter>', 'exec'), scope)
+        paint_snapshot = scope['paintEvent']
+
         class Probe(base):
+            def __init__(self, *args, **kwargs):
+                self.lifts = {}
+                self.motions = {}
+                super().__init__(*args, **kwargs)
+
             def relayout(self):
-                if getattr(self, '_exit_driver', None) is not None:
-                    self.reset_hover()
+                self.reset_hover()
                 super().relayout()
                 if rendering == 'outline':
                     attr = 'layout' if version == '5.4.3' else 'text_layout'
@@ -97,119 +95,129 @@ def create_test(version, timing, height, curve, frames, duration, rendering="nat
                     if current is not None:
                         setattr(self, attr, OutlineLayout(current))
 
+            def _stop_motion(self, number):
+                motion = self.motions.pop(number, None)
+                if motion:
+                    motion['driver'].stop()
+                    motion['driver'].deleteLater()
+
             def reset_hover(self):
-                if getattr(self, '_exit_driver', None) is not None:
-                    self._exit_driver.stop()
-                self._exiting = False
-                super().focus(None)
+                for number in list(self.motions):
+                    self._stop_motion(number)
+                self.lifts.clear()
+                self.hovered = None
                 self.lift = 0
                 self.update()
 
-            def _exit_value(self, progress):
-                self.lift = self._exit_start * (1 - progress)
-                self.update()
+            def _move_to(self, number, goal, milliseconds, easing):
+                initial = self.lifts.get(number, 0.0)
+                self._stop_motion(number)
+                if milliseconds == 0 or easing is None or initial == goal:
+                    self._finish(number, goal)
+                    return
+                self.lifts[number] = initial
+                start = time.monotonic()
+                def value(progress):
+                    self.lifts[number] = initial + (goal - initial) * progress
+                    self.lift = self.lifts.get(self.hovered, 0.0)
+                    self.update()
+                if timing == 'QTimer':
+                    driver = QTimer(self)
+                    driver.setInterval(16)
+                    def tick():
+                        progress = min(1, (time.monotonic() - start) * 1000 / milliseconds)
+                        value(easing.valueForProgress(progress))
+                        if progress >= 1:
+                            self._finish(number, goal)
+                    driver.timeout.connect(tick)
+                else:
+                    driver = QVariantAnimation(self)
+                    driver.setStartValue(0.0)
+                    driver.setEndValue(1.0)
+                    driver.setDuration(milliseconds)
+                    driver.setEasingCurve(easing)
+                    driver.valueChanged.connect(value)
+                    driver.finished.connect(lambda: self._finish(number, goal))
+                self.motions[number] = {'driver': driver, 'goal': goal}
+                driver.start()
 
-            def _exit_tick(self):
-                progress = min(1, (time.monotonic() - self._exit_started) / (duration / 1000))
-                self._exit_value(exit_curve.valueForProgress(progress))
-                if progress >= 1:
-                    self.reset_hover()
+            def _finish(self, number, goal):
+                self._stop_motion(number)
+                if goal == 0 and number != self.hovered:
+                    self.lifts.pop(number, None)
+                else:
+                    self.lifts[number] = goal
+                self.lift = self.lifts.get(self.hovered, 0.0)
+                self.update()
 
             def focus(self, number):
-                if number is None and getattr(self, '_exiting', False):
+                if number == self.hovered:
                     return
-                if number is None and exit_curve is not None and self.hovered is not None and self.lift != 0 and duration > 0:
-                    driver = self.timer if version == '5.4.3' else self.lift_animation
-                    driver.stop()
-                    self._exit_start = self.lift
-                    self._exit_started = time.monotonic()
-                    self._exiting = True
-                    if getattr(self, '_exit_driver', None) is None:
-                        if timing == 'QTimer':
-                            self._exit_driver = QTimer(self)
-                            self._exit_driver.setInterval(16)
-                            self._exit_driver.timeout.connect(self._exit_tick)
-                        else:
-                            self._exit_driver = QVariantAnimation(self)
-                            self._exit_driver.setStartValue(0.0)
-                            self._exit_driver.setEndValue(1.0)
-                            self._exit_driver.setDuration(duration)
-                            self._exit_driver.setEasingCurve(exit_curve)
-                            self._exit_driver.valueChanged.connect(self._exit_value)
-                            self._exit_driver.finished.connect(self.reset_hover)
-                    self._exit_driver.start()
-                    self.setCursor(Qt.ArrowCursor)
-                    return
-                if getattr(self, '_exiting', False):
-                    self.reset_hover()
-                super().focus(number)
-                if duration == 0 and number is not None:
-                    driver = self.timer if version == '5.4.3' else self.lift_animation
-                    driver.stop()
-                    self.lift = height
-                    self.update()
-
-            def animate(self):
-                progress = 1 if duration == 0 else min(1, (time.monotonic() - self.started) / (duration / 1000))
-                self.lift = height * curve.valueForProgress(progress)
-                if progress >= 1:
-                    self.timer.stop()
+                previous = self.hovered
+                self.hovered = number
+                if previous is not None:
+                    self._move_to(previous, 0.0, exit_duration, exit_curve)
+                if number is not None:
+                    self._move_to(number, float(height), duration, curve)
+                self.lift = self.lifts.get(number, 0.0)
+                self.setCursor(Qt.PointingHandCursor if number is not None else Qt.ArrowCursor)
                 self.update()
+
+            def _draw_moving_text(self, painter, viewport):
+                text_layout = self.layout if version == '5.4.3' else self.text_layout
+                if not text_layout:
+                    return
+                origin = QPointF(31 if version == '5.4.3' else self.MARGIN_X, self.text_top()-self.scroll)
+                # Shared glyphs must not be duplicated by overlapping annotations.
+                # The actual hovered target wins, then the newest active target.
+                order = list(reversed(self.lifts))
+                if self.hovered in order:
+                    order.remove(self.hovered)
+                    order.insert(0, self.hovered)
+                claimed = QPainterPath()
+                targets = []
+                for number in order:
+                    target = QPainterPath()
+                    for rect in self.rects[number]:
+                        part = QPainterPath()
+                        part.addRect(self.displayed_rect(rect))
+                        target = target.united(part)
+                    targets.append((number, target.subtracted(claimed)))
+                    claimed = claimed.united(target)
+                all_text = QPainterPath()
+                all_text.addRect(viewport)
+                painter.setPen(QColor(245, 246, 250, 255))
+                painter.save()
+                painter.setClipPath(all_text.subtracted(claimed), Qt.IntersectClip)
+                text_layout.draw(painter, origin)
+                painter.restore()
+                for number, target in targets:
+                    painter.save()
+                    painter.translate(0, -self.lifts[number])
+                    painter.setClipPath(target, Qt.IntersectClip)
+                    text_layout.draw(painter, origin)
+                    painter.restore()
 
             def paintEvent(self, event):
                 frames.append({'ms': (time.perf_counter() - started) * 1000,
                                'lift': float(self.lift), 'hovered': self.hovered,
-                               'exiting': getattr(self, '_exiting', False),
+                               'lifts': dict(self.lifts),
+                               'goals': {n: m['goal'] for n, m in self.motions.items()},
                                'size': [self.width(), self.height()]})
-                super().paintEvent(event)
+                paint_snapshot(self, event)
         return Probe
 
     if version == '5.4.3':
         ns = load(SNAP / 'old.py')
         base = ns['SubtitleWindow']
-        if timing == 'QVariantAnimation':
-            class Swapped(base):
-                def __init__(self):
-                    super().__init__()
-                    self.timer.stop()
-                    self.timer.deleteLater()
-                    self.timer = QVariantAnimation(self)
-                    self.timer.setStartValue(0.0)
-                    self.timer.setEndValue(1.0)
-                    self.timer.setDuration(140)
-                    self.timer.setEasingCurve(QEasingCurve.OutCubic)
-                    self.timer.valueChanged.connect(self.set_lift)
-
-                def set_lift(self, value):
-                    self.lift = value
-                    self.update()
-            base = Swapped
         window = probe(base)()
         view = window
     else:
         ns = load(SNAP / 'new.py')
         base = ns['AnnotatedTextView']
-        if timing == 'QTimer':
-            class Swapped(base):
-                def __init__(self, parent=None):
-                    super().__init__(parent)
-                    self.lift_animation.stop()
-                    self.lift_animation.deleteLater()
-                    self.lift_animation = WallClockTimer(self)
-            base = Swapped
         ns['AnnotatedTextView'] = probe(base)
         window = ns['SubtitleWindow']()
         view = window.view
-
-    driver = view.timer if version == '5.4.3' else view.lift_animation
-    if isinstance(driver, QVariantAnimation):
-        driver.setDuration(duration)
-        driver.setEndValue(float(height))
-        driver.setEasingCurve(curve)
-    elif isinstance(driver, WallClockTimer):
-        driver.duration = duration
-        driver.height = height
-        driver.curve = curve
 
     items = core.resolve_items(DATA, TEXT)
     view.replay_target = next((i for i, item in enumerate(items) if any(TEXT[a:b] == 'be' for a, b in item['ranges'])), 0)
@@ -298,7 +306,8 @@ def run(version='5.4.3', timing='QTimer'):
         form.addRow(title, row)
         return slider
     height = slider_row('上浮高度', 300, 1, ' px')
-    duration = slider_row('上浮总时间', 6000, 140, ' ms')
+    duration = slider_row('进入时长', 6000, 140, ' ms')
+    exit_time = slider_row('退出时长', 6000, 140, ' ms')
     curves = QComboBox()
     names = ['OutCubic', 'Linear', 'InCubic', 'InOutCubic', 'OutQuad', 'OutSine', 'OutExpo', 'OutBack', 'OutBounce', 'OutElastic']
     curves.addItems(names)
@@ -308,7 +317,7 @@ def run(version='5.4.3', timing='QTimer'):
     for name in names:
         exit_curves.addItem(name, name)
     form.addRow('退出缓动', exit_curves)
-    exit_note = QLabel('退出默认立即复位。启用后从当前高度返回原位，共用上浮时长及计时方式。\n再次进入或切换标注会取消退出，并重新播放进入动画。')
+    exit_note = QLabel('退出默认立即复位。进入和退出各有独立时长，均从当前位移接续。\n每个标注独立运行；方向改变时位置连续，但速度可能变化。')
     exit_note.setWordWrap(True)
     animation.addWidget(exit_note)
     limits = QLabel('高度 0–300px · 时长 0–6000ms（0ms 立即到达终点）\n滑块释放后应用；切换参数会保存记录并重建悬浮窗。')
@@ -342,7 +351,7 @@ def run(version='5.4.3', timing='QTimer'):
         if not state:
             return
         destination = ROOT / (state['version'] + '+' + state['timing'] + '+' + state['rendering'] + '-frames.json')
-        payload = {key: state[key] for key in ('version', 'timing', 'height', 'curve', 'rendering', 'exit_curve', 'frames')}
+        payload = {key: state[key] for key in ('version', 'timing', 'height', 'curve', 'rendering', 'exit_curve', 'exit_duration_ms', 'frames')}
         payload['duration_ms'] = state['duration']
         destination.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
         status.setText(f"已保存 {len(state['frames'])} 帧：{destination.name}")
@@ -357,20 +366,20 @@ def run(version='5.4.3', timing='QTimer'):
         v, t = variants[versions.currentIndex()]
         frames = []
         window, view = create_test(v, t, height.value(), QEasingCurve(getattr(QEasingCurve, curves.currentText())), frames, duration.value(), rendering.currentData(),
-                                   QEasingCurve(getattr(QEasingCurve, exit_curves.currentData())) if exit_curves.currentData() else None)
+                                   QEasingCurve(getattr(QEasingCurve, exit_curves.currentData())) if exit_curves.currentData() else None, exit_time.value())
         if position is not None:
             window.move(position)
         state.update(window=window, view=view, frames=frames, version=v, timing=t,
-                     height=height.value(), curve=curves.currentText(), duration=duration.value(), rendering=rendering.currentData(), exit_curve=exit_curves.currentData())
+                     height=height.value(), curve=curves.currentText(), duration=duration.value(), rendering=rendering.currentData(), exit_curve=exit_curves.currentData(), exit_duration_ms=exit_time.value())
         shell = ('5.4.3：顶层 SubtitleWindow 直接绘制文字与标注。' if v == '5.4.3'
                  else '5.5.0：SubtitleWindow 外壳 + AnnotatedTextView 子视图绘制。')
-        clock = ('QTimer：16ms timeout，time.monotonic 测量经过时间，QEasingCurve 求位移。' if t == 'QTimer'
-                 else 'QVariantAnimation：Qt 动画时钟推进，QEasingCurve 插值，valueChanged 更新位移。')
+        clock = ('每个标注独立运行。QTimer：16ms timeout，time.monotonic 测量经过时间，QEasingCurve 求位移。' if t == 'QTimer'
+                 else '每个标注独立运行。QVariantAnimation：Qt 动画时钟推进，QEasingCurve 插值，valueChanged 更新位移。')
         paint = ('原始：QTextLayout 完成排版并直接绘制字形；背景为抗锯齿几何图形。纵向小数位移可能阶梯化。'
                  if rendering.currentData() == 'native' else
                  '轮廓：QTextLayout 排版 → glyphRuns 保留字形与位置 → QRawFont.pathForGlyph 缓存轮廓 → QPainter.fillPath 抗锯齿绘制。静止与动画文字统一使用轮廓，保留加粗和颜色；锐利度可能不同，首次布局成本更高。背景和裁剪仍使用原实现。')
         technology.setText('<b>窗口结构</b><br>' + shell + '<br><br><b>动画计时</b><br>' + clock + '<br><br><b>文字渲染</b><br>' + paint)
-        formula.setText('t∈[0,1]；上浮位移 = 高度 × f(t)\n' + FORMULAS[curves.currentText()])
+        formula.setText('t∈[0,1]；进入位移 = 起始位移 + (高度 − 起始位移) × f(t)\n' + FORMULAS[curves.currentText()])
         formula.setText(formula.text() + ('\n\n退出：立即复位' if exit_curves.currentData() is None else '\n\n退出位移 = 离开时高度 × [1 − f(t)]\n' + FORMULAS[exit_curves.currentData()]))
         status.setText('当前：' + v + '+' + t)
         toggle_window.setText('关闭悬浮窗')
@@ -399,6 +408,7 @@ def run(version='5.4.3', timing='QTimer'):
     versions.currentIndexChanged.connect(rebuild)
     height.valueChanged.connect(rebuild)
     duration.valueChanged.connect(rebuild)
+    exit_time.valueChanged.connect(rebuild)
     curves.currentIndexChanged.connect(rebuild)
     rendering.currentIndexChanged.connect(rebuild)
     exit_curves.currentIndexChanged.connect(rebuild)
@@ -452,17 +462,46 @@ def run(version='5.4.3', timing='QTimer'):
                 QTest.qWait(220)
                 view = state['view']
                 view.focus(None)
-                assert view.hovered is not None and view.lift == 5
+                assert view.hovered is None and view.lifts[view.replay_target] == 5
                 QTest.qWait(50)
-                assert getattr(view, '_exiting', False)
+                assert view.replay_target in view.motions
                 QTest.qWait(180)
                 assert view.hovered is None and view.lift == 0
                 replay_animation()
                 QTest.qWait(50)
                 view.focus(None)
                 view.focus(view.replay_target)
-                assert not view._exiting
+                assert view.motions[view.replay_target]['goal'] == 5
                 view.reset_hover()
+        duration.setValue(200)
+        exit_time.setValue(400)
+        exit_curves.setCurrentText('Linear')
+        curves.setCurrentText('Linear')
+        for index in range(4):
+            versions.setCurrentIndex(index)
+            app.processEvents()
+            QTest.qWait(60)
+            view = state['view']
+            first = view.replay_target
+            second = next(n for n in range(len(view.items)) if n != first)
+            view.focus(first)
+            QTest.qWait(80)
+            before_exit = view.lifts[first]
+            view.focus(second)
+            assert view.lifts[first] == before_exit
+            assert first in view.motions and second in view.motions
+            QTest.qWait(60)
+            before_enter = view.lifts[first]
+            assert 0 < before_enter < before_exit
+            view.focus(first)
+            assert view.lifts[first] == before_enter
+            assert first in view.motions and second in view.motions
+            QTest.qWait(240)
+            assert view.lifts[first] == 5
+            assert second in view.motions  # exit uses 400ms, not the 200ms entry duration
+            QTest.qWait(220)
+            assert second not in view.lifts and first not in view.motions
+            view.reset_hover()
         exit_curves.setCurrentIndex(0)
         duration.setValue(0)
         height.setValue(300)
