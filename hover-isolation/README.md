@@ -8,7 +8,7 @@ $env:QT_QPA_PLATFORM = 'windows'
 ```
 
 统一控制窗提供 5.4.3 / 5.5.0 绘制结构与 QTimer / QVariantAnimation 的四种组合。
-上浮高度为 0–400 逻辑像素，时长为 0–10000ms，0ms 立即到达终点。
+上浮高度为 0–300 逻辑像素，时长为 0–6000ms，0ms 立即到达终点。
 默认 1px、140ms、OutCubic；QTimer 间隔 16ms。曲线选择下方显示公式。
 滑块释放后应用参数，也可直接输入数值。切换参数会重建测试窗口并重置记录。
 演示窗为 1500×850，使用 demo-annotations.json 中用户提供的完整文本和标注。
@@ -44,3 +44,16 @@ QTimer 测试包装通过 QEasingCurve.valueForProgress 求值；默认 OutCubic
 $env:QT_QPA_PLATFORM = 'offscreen'
 & '.\.venv\Scripts\python.exe' '-B' '.\hover-isolation\runner.py' '--smoke'
 ```
+
+## 文字绘制方式
+
+控制窗可独立选择原始 QTextLayout.draw 或字形轮廓方案，与四种窗口/计时组合搭配。
+UI 会显示当前窗口结构、计时机制和文字绘制技术栈。
+轮廓方案使用原 QTextLayout 的 glyphRuns 获取已塑形字形、位置与格式范围，
+通过 QRawFont.pathForGlyph 缓存轮廓，再用 QPainter.fillPath 抗锯齿绘制。
+静止与动画统一使用轮廓，以避免起止时切换渲染方式；原有背景、裁剪、颜色和加粗保留。
+这会改变文字锐利度和绘制成本，是实验选项，不修改 snapshots 或主程序。
+默认仍为原始文字绘制。记录文件名加入 native / outline，避免两种绘制模式互相覆盖。
+控制窗的关闭悬浮窗按钮可关闭测试窗口，再次点击可重新打开。
+
+控制窗按版本与绘制、动画参数、缓动公式分区；说明区可滚动，操作按钮固定在底部。
