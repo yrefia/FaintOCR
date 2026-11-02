@@ -65,6 +65,42 @@ class OutlineLayout:
         painter.restore()
 
 
+def inverse_progress(easing, position, reference):
+    """Find the nearest branch of f(p)=position; return the closest point if unreachable."""
+    count = 2048
+    samples = [easing.valueForProgress(i / count) - position for i in range(count + 1)]
+    roots = []
+    for i, error in enumerate(samples):
+        if abs(error) < 1e-10:
+            roots.append(i / count)
+        if i and samples[i-1] * error < 0:
+            low, high = (i-1) / count, i / count
+            low_error = samples[i-1]
+            for _ in range(40):
+                middle = (low + high) / 2
+                middle_error = easing.valueForProgress(middle) - position
+                if low_error * middle_error <= 0:
+                    high = middle
+                else:
+                    low, low_error = middle, middle_error
+            candidate = (low + high) / 2
+            # Do not mistake an endpoint discontinuity for an inverse solution.
+            if abs(easing.valueForProgress(candidate) - position) < 1e-8:
+                roots.append(candidate)
+    if roots:
+        return min(roots, key=lambda value: (abs(value-reference), value))
+    closest = min(range(count+1), key=lambda i: (abs(samples[i]), abs(i/count-reference)))
+    low, high = max(0, closest-1)/count, min(count, closest+1)/count
+    for _ in range(40):
+        left, right = (2*low+high)/3, (low+2*high)/3
+        if abs(easing.valueForProgress(left)-position) < abs(easing.valueForProgress(right)-position):
+            high = right
+        else:
+            low = left
+    candidates = [closest/count, (low+high)/2, 0.0, 1.0]
+    return min(candidates, key=lambda value: (abs(easing.valueForProgress(value)-position), abs(value-reference)))
+
+
 def create_test(version, timing, height, curve, frames, duration, rendering="native", exit_curve=None, exit_duration=140):
     started = time.perf_counter()
 
@@ -111,34 +147,59 @@ def create_test(version, timing, height, curve, frames, duration, rendering="nat
 
             def _move_to(self, number, goal, milliseconds, easing):
                 initial = self.lifts.get(number, 0.0)
+                previous = self.motions.get(number)
                 self._stop_motion(number)
-                if milliseconds == 0 or easing is None or initial == goal:
+                if milliseconds == 0 or easing is None or height == 0:
                     self._finish(number, goal)
                     return
+                endpoint = 1.0 if goal == height else 0.0
+                reference = previous['phase'] if previous else max(0.0, min(1.0, initial/height))
+                if previous and previous['curve'] == easing:
+                    phase = reference  # same curve: reverse its clock, no inverse lookup
+                else:
+                    phase = inverse_progress(easing, initial/height, reference)
+                residual = initial - height * easing.valueForProgress(phase)
+                if abs(residual) < 1e-7:
+                    residual = 0.0
+                if abs(endpoint-phase) < 1e-10:
+                    if residual == 0:
+                        self._finish(number, goal)
+                        return
+                    # An overshoot can lie outside the new curve's range. Preserve
+                    # position with a decaying residual rather than snapping/clamping.
+                    phase = 1.0-endpoint
+                    residual = initial - height * easing.valueForProgress(phase)
+                span = abs(endpoint-phase)
+                remaining_ms = milliseconds * span
                 self.lifts[number] = initial
                 start = time.monotonic()
-                def value(progress):
-                    self.lifts[number] = initial + (goal - initial) * progress
+                motion = {'goal': goal, 'curve': QEasingCurve(easing), 'phase': phase,
+                          'remaining_ms': remaining_ms, 'residual': residual}
+                def value(fraction):
+                    current = phase + (endpoint-phase) * fraction
+                    motion['phase'] = current
+                    self.lifts[number] = height * easing.valueForProgress(current) + residual * (1-fraction)
                     self.lift = self.lifts.get(self.hovered, 0.0)
                     self.update()
                 if timing == 'QTimer':
                     driver = QTimer(self)
                     driver.setInterval(16)
                     def tick():
-                        progress = min(1, (time.monotonic() - start) * 1000 / milliseconds)
-                        value(easing.valueForProgress(progress))
-                        if progress >= 1:
+                        fraction = min(1, (time.monotonic() - start) * 1000 / remaining_ms)
+                        value(fraction)
+                        if fraction >= 1:
                             self._finish(number, goal)
                     driver.timeout.connect(tick)
                 else:
                     driver = QVariantAnimation(self)
                     driver.setStartValue(0.0)
                     driver.setEndValue(1.0)
-                    driver.setDuration(milliseconds)
-                    driver.setEasingCurve(easing)
+                    driver.setDuration(max(1, round(remaining_ms)))
+                    driver.setEasingCurve(QEasingCurve.Linear)
                     driver.valueChanged.connect(value)
                     driver.finished.connect(lambda: self._finish(number, goal))
-                self.motions[number] = {'driver': driver, 'goal': goal}
+                motion['driver'] = driver
+                self.motions[number] = motion
                 driver.start()
 
             def _finish(self, number, goal):
@@ -203,6 +264,7 @@ def create_test(version, timing, height, curve, frames, duration, rendering="nat
                                'lift': float(self.lift), 'hovered': self.hovered,
                                'lifts': dict(self.lifts),
                                'goals': {n: m['goal'] for n, m in self.motions.items()},
+                               'phases': {n: m['phase'] for n, m in self.motions.items()},
                                'size': [self.width(), self.height()]})
                 paint_snapshot(self, event)
         return Probe
@@ -317,7 +379,7 @@ def run(version='5.4.3', timing='QTimer'):
     for name in names:
         exit_curves.addItem(name, name)
     form.addRow('退出缓动', exit_curves)
-    exit_note = QLabel('退出默认立即复位。进入和退出各有独立时长，均从当前位移接续。\n每个标注独立运行；方向改变时位置连续，但速度可能变化。')
+    exit_note = QLabel('退出默认立即复位。进入和退出时长表示走完整条曲线所需时间。\n同曲线反向计时；异曲线按当前归一化位置反求进度。\n多解选最近进度；超调无解时用渐消偏移保持位置连续。')
     exit_note.setWordWrap(True)
     animation.addWidget(exit_note)
     limits = QLabel('高度 0–300px · 时长 0–6000ms（0ms 立即到达终点）\n滑块释放后应用；切换参数会保存记录并重建悬浮窗。')
@@ -379,8 +441,8 @@ def run(version='5.4.3', timing='QTimer'):
                  if rendering.currentData() == 'native' else
                  '轮廓：QTextLayout 排版 → glyphRuns 保留字形与位置 → QRawFont.pathForGlyph 缓存轮廓 → QPainter.fillPath 抗锯齿绘制。静止与动画文字统一使用轮廓，保留加粗和颜色；锐利度可能不同，首次布局成本更高。背景和裁剪仍使用原实现。')
         technology.setText('<b>窗口结构</b><br>' + shell + '<br><br><b>动画计时</b><br>' + clock + '<br><br><b>文字渲染</b><br>' + paint)
-        formula.setText('t∈[0,1]；进入位移 = 起始位移 + (高度 − 起始位移) × f(t)\n' + FORMULAS[curves.currentText()])
-        formula.setText(formula.text() + ('\n\n退出：立即复位' if exit_curves.currentData() is None else '\n\n退出位移 = 离开时高度 × [1 − f(t)]\n' + FORMULAS[exit_curves.currentData()]))
+        formula.setText('p∈[0,1]；位移 = 高度 × f(p)，进入 p 递增至 1\n' + FORMULAS[curves.currentText()])
+        formula.setText(formula.text() + ('\n\n退出：立即复位' if exit_curves.currentData() is None else '\n\n退出：位移 = 高度 × f(p)，p 递减至 0（公式中的 t 即 p）\n' + FORMULAS[exit_curves.currentData()]))
         status.setText('当前：' + v + '+' + t)
         toggle_window.setText('关闭悬浮窗')
         replay.setEnabled(True)
@@ -426,6 +488,14 @@ def run(version='5.4.3', timing='QTimer'):
     panel.closeEvent = shutdown
     if '--smoke' in sys.argv:
         from PySide6.QtTest import QTest
+        for name in names:
+            easing = QEasingCurve(getattr(QEasingCurve, name))
+            for phase in (.1, .3, .6, .9):
+                position = easing.valueForProgress(phase)
+                recovered = inverse_progress(easing, position, phase)
+                assert abs(easing.valueForProgress(recovered)-position) < 1e-7
+                assert abs(recovered-phase) < 1e-5
+        assert abs(inverse_progress(QEasingCurve(QEasingCurve.InCubic), .125, .1)-.5) < 1e-8
         for index in range(4):
             versions.setCurrentIndex(index)
             for name in ('OutCubic', 'Linear', 'OutBack'):
@@ -487,21 +557,41 @@ def run(version='5.4.3', timing='QTimer'):
             view.focus(first)
             QTest.qWait(80)
             before_exit = view.lifts[first]
+            phase_before_exit = view.motions[first]['phase']
             view.focus(second)
+            assert view.motions[first]['phase'] == phase_before_exit
+            assert abs(view.motions[first]['remaining_ms'] - 400*phase_before_exit) < 1e-6
             assert view.lifts[first] == before_exit
             assert first in view.motions and second in view.motions
             QTest.qWait(60)
             before_enter = view.lifts[first]
             assert 0 < before_enter < before_exit
+            phase_before_enter = view.motions[first]['phase']
             view.focus(first)
+            assert view.motions[first]['phase'] == phase_before_enter
+            assert abs(view.motions[first]['remaining_ms'] - 200*(1-phase_before_enter)) < 1e-6
             assert view.lifts[first] == before_enter
             assert first in view.motions and second in view.motions
             QTest.qWait(240)
             assert view.lifts[first] == 5
-            assert second in view.motions  # exit uses 400ms, not the 200ms entry duration
+            assert second not in view.motions  # only the remaining curve segment is timed
             QTest.qWait(220)
             assert second not in view.lifts and first not in view.motions
             view.reset_hover()
+        curves.setCurrentText('OutBack')
+        exit_curves.setCurrentText('Linear')
+        for index in range(4):
+            versions.setCurrentIndex(index)
+            app.processEvents()
+            view = state['view']
+            number = view.replay_target
+            view.hovered = number
+            view.lifts[number] = 5.5
+            view.focus(None)
+            assert abs(view.lifts[number]-5.5) < 1e-7
+            assert view.motions[number]['residual'] > 0
+            QTest.qWait(450)
+            assert number not in view.lifts
         exit_curves.setCurrentIndex(0)
         duration.setValue(0)
         height.setValue(300)
