@@ -1,5 +1,7 @@
 """Embeddable Qt annotation view. No API calls, prompts or application window policy."""
 import time
+import math
+from dataclasses import dataclass
 from PySide6.QtCore import Qt, QRectF, QPointF, QTimer, Signal, QEasingCurve
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QTextLayout, QTextOption, QTextCharFormat, QPainterPath
 from PySide6.QtWidgets import QWidget
@@ -15,6 +17,23 @@ def rgba(value, alpha=255):
     result = QColor(value)
     result.setAlpha(alpha)
     return result
+
+@dataclass(frozen=True)
+class HoverAnimationConfig:
+    """Effect parameters; changes apply at the next hover, never halfway through one."""
+    height_px: float = 1.0
+    duration_ms: float = 140.0
+    easing: QEasingCurve.Type = QEasingCurve.Type.OutExpo
+
+    def __post_init__(self):
+        for value in (self.height_px, self.duration_ms):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                raise ValueError('Animation height and duration must be finite non-negative numbers')
+        if not isinstance(self.easing, QEasingCurve.Type) or self.easing in (
+            QEasingCurve.Type.Custom, QEasingCurve.Type.NCurveTypes,
+        ):
+            raise ValueError('Use a built-in QEasingCurve.Type')
+
 
 class AnnotatedTextView(QWidget):
     annotation_clicked = Signal(int)
@@ -36,12 +55,19 @@ class AnnotatedTextView(QWidget):
         self.rects = []
         self.content_height = 0
         self._blank_pressed = False
-        self.lift_curve = QEasingCurve(QEasingCurve.OutExpo)
+        self.hover_animation = HoverAnimationConfig()
+        self._active_animation = self.hover_animation
+        self.lift_curve = QEasingCurve(self.hover_animation.easing)
         self.timer = QTimer(self)
         self.timer.setInterval(16)
         self.timer.timeout.connect(self.animate)
         self.text_font = QFont('Microsoft YaHei UI', 14, QFont.Medium)
         self.relayout()
+
+    def set_hover_animation(self, config):
+        if not isinstance(config, HoverAnimationConfig):
+            raise TypeError('config must be HoverAnimationConfig')
+        self.hover_animation = config
 
     def set_content(self, source, items, enabled=None):
         layers = set(LAYERS) if enabled is None else set(enabled)
@@ -128,6 +154,8 @@ class AnnotatedTextView(QWidget):
     def _cache_glyph_outlines(self):
         """Keep Qt shaping/UTF-16 positions and format colors; rebuild only on layout changes."""
         self.glyph_outlines = []
+        self._glyph_bounds = []
+        lines = {}
         formats = self.text_layout.formats()
         for run in self.text_layout.glyphRuns(0, -1, QTextLayout.GlyphRunRetrievalFlag.RetrieveAll):
             font = run.rawFont()
@@ -137,14 +165,33 @@ class AnnotatedTextView(QWidget):
                     if part.start <= index < part.start + part.length:
                         color = part.format.foreground().color()
                 outline = font.pathForGlyph(glyph).translated(position)
+                glyph_index = len(self.glyph_outlines)
                 self.glyph_outlines.append((outline, color))
+                bounds = outline.boundingRect()
+                self._glyph_bounds.append(bounds)
+                line_number = self.text_layout.lineForTextPosition(index).lineNumber()
+                if line_number not in lines:
+                    lines[line_number] = [QRectF(), []]
+                lines[line_number][0] = lines[line_number][0].united(bounds)
+                lines[line_number][1].append(glyph_index)
+        self._outline_lines = tuple(lines.values())
 
     def _draw_text_outlines(self, painter, origin):
         # Vector coverage changes at fractional Y positions; native glyph drawing
         # can snap vertically even when the painter translation is fractional.
         painter.save()
         painter.translate(origin)
-        for outline, color in self.glyph_outlines:
+        if painter.hasClipping():
+            # clipBoundingRect is expressed in the current, translated coordinates.
+            # Preserve original glyph order even when shaped runs span multiple lines.
+            clip = painter.clipBoundingRect().adjusted(-2, -2, 2, 2)
+            indices = sorted(index for bounds, group in self._outline_lines
+                             if bounds.intersects(clip) for index in group
+                             if self._glyph_bounds[index].intersects(clip))
+        else:
+            indices = range(len(self.glyph_outlines))
+        for index in indices:
+            outline, color = self.glyph_outlines[index]
             painter.fillPath(outline, color)
         painter.restore()
 
@@ -157,11 +204,11 @@ class AnnotatedTextView(QWidget):
         return rect.translated(0, self.text_top()-self.scroll)
 
 
-    def paintEvent(self, _event):
+    def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         viewport = self.text_area().adjusted(-6, -4, 6, 6)
-        p.setClipRect(viewport)
+        p.setClipRect(viewport.intersected(QRectF(event.rect())))
         # Backgrounds always precede underlines, regardless of API item order.
         for number, item in sorted(enumerate(self.items), key=lambda pair: PAINT_ORDER[pair[1]['category']]):
             category = item['category']
@@ -218,17 +265,37 @@ class AnnotatedTextView(QWidget):
         if number != self.hovered:
             self.hovered, self.lift = number, 0
             self.started = time.monotonic()
-            self.timer.start() if number is not None else self.timer.stop()
+            self.timer.stop()
+            if number is not None:
+                self._active_animation = self.hover_animation
+                self.lift_curve = QEasingCurve(self._active_animation.easing)
+                if self._active_animation.duration_ms == 0:
+                    self.lift = self._active_animation.height_px
+                elif self._active_animation.height_px > 0:
+                    self.timer.start()
             self.update()
         self.setCursor(Qt.PointingHandCursor if number is not None else Qt.ArrowCursor)
 
 
+    def _hover_damage(self, previous_lift):
+        damage = QRectF()
+        if self.hovered is not None:
+            for rect in self.rects[self.hovered]:
+                bounds = self.displayed_rect(rect).adjusted(-5, -5, 5, 5)
+                damage = damage.united(bounds.translated(0, -previous_lift))
+                damage = damage.united(bounds.translated(0, -self.lift))
+        return damage.toAlignedRect()
+
     def animate(self):
-        progress = min(1, (time.monotonic()-self.started)/.14)
-        self.lift = self.lift_curve.valueForProgress(progress)
+        config = self._active_animation
+        progress = 1.0 if config.duration_ms == 0 else min(1, max(0, (time.monotonic()-self.started)*1000/config.duration_ms))
+        previous_lift = self.lift
+        self.lift = config.height_px if progress >= 1 else config.height_px * self.lift_curve.valueForProgress(progress)
         if progress >= 1:
             self.timer.stop()
-        self.update()
+        damage = self._hover_damage(previous_lift)
+        if not damage.isEmpty():
+            self.update(damage)
 
 
     def leaveEvent(self, event):

@@ -57,3 +57,25 @@ AnnotatedTextView 保留 QTextLayout 的塑形、换行、UTF-16 索引及标注
 避免原生文字纵向像素对齐导致的小数位移阶梯。轮廓渲染的锐利度可能与原生文字不同。
 动画使用 16ms QTimer + monotonic，默认 140ms、1 逻辑像素、QEasingCurve.OutExpo。
 文字和标注使用同一 lift。字体、内容、宽度或图层变化时重新布局并更新轮廓缓存。
+
+### 动画配置与绘制范围
+
+```python
+from ia_learning_core.view import HoverAnimationConfig
+from PySide6.QtCore import QEasingCurve
+
+view.set_hover_animation(HoverAnimationConfig(
+    height_px=1.0,
+    duration_ms=140,
+    easing=QEasingCurve.Type.OutExpo,
+))
+```
+
+配置不可变，拒绝负数、非有限数和自定义曲线占位符；每次悬停开始时取快照，
+运行中的动画不受后续设置影响。0ms 直接到达终点；零高度不启动计时器。
+终点明确设置为 height_px，过程中保留曲线原有超调。配置的保存与设置 UI 由宿主负责。
+
+字形缓存按排版行索引，并存储实际轮廓边界。绘制时根据当前变换后的裁剪范围，
+先筛选行再筛选字形，保持原绘制顺序；悬停目标使用同一筛选流程，无需重复遍历全文字形。
+动画只请求刷新目标旧位置与新位置的并集，并保留背景、边框和抗锯齿余量。
+内容、布局、悬停切换等情况仍请求完整刷新。历史隔离快照不随此实现更新。

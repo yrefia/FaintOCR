@@ -130,7 +130,7 @@ class DemoTests(unittest.TestCase):
         view = w.subtitle.view
         view.focus(0)
         deadline = time.monotonic() + 1
-        while view.lift < 1 and time.monotonic() < deadline:
+        while view.timer.isActive() and time.monotonic() < deadline:
             self.app.processEvents()
             time.sleep(.01)
         self.assertEqual(view.lift, 1.0)
@@ -171,6 +171,79 @@ class DemoTests(unittest.TestCase):
             view.animate()
         self.assertAlmostEqual(view.lift, view.lift_curve.valueForProgress(.5))
         self.assertGreater(view.lift, .96)
+        view.focus(None)
+
+    def test_hover_configuration_is_validated_and_snapshotted(self):
+        from PySide6.QtCore import QEasingCurve
+        from ia_learning_core.view import HoverAnimationConfig
+        view = self.window.subtitle.view
+        self.window.demo()
+        view.set_hover_animation(HoverAnimationConfig(3, 1000, QEasingCurve.Linear))
+        view.focus(0)
+        view.started = 100
+        view.set_hover_animation(HoverAnimationConfig(7, 0))
+        with patch('ia_learning_core.view.time.monotonic', return_value=100.5):
+            view.animate()
+        self.assertEqual(view.lift, 1.5)
+        view.focus(None)
+        view.focus(0)
+        self.assertEqual(view.lift, 7)
+        self.assertFalse(view.timer.isActive())
+        view.focus(None)
+        view.set_hover_animation(HoverAnimationConfig(0, 1000))
+        view.focus(0)
+        self.assertEqual(view.lift, 0)
+        self.assertFalse(view.timer.isActive())
+        for value in (-1, float('nan'), float('inf'), True):
+            with self.assertRaises(ValueError):
+                HoverAnimationConfig(height_px=value)
+            with self.assertRaises(ValueError):
+                HoverAnimationConfig(duration_ms=value)
+
+    def test_culled_outlines_match_full_drawing(self):
+        from PySide6.QtCore import QPointF, QRectF, Qt
+        from PySide6.QtGui import QImage, QPainter
+        view = self.window.subtitle.view
+        view.resize(420, 240)
+        view.set_content(('office italic café 中文 words and letters. ' * 150), [])
+        class CountingPainter(QPainter):
+            count = 0
+            def fillPath(self, path, brush):
+                self.count += 1
+                super().fillPath(path, brush)
+        for dpr in (1, 1.5, 2):
+            for offset in (0, -105.4, -340.8):
+                results = []
+                for optimized in (False, True):
+                    image = QImage(int(420*dpr), int(240*dpr), QImage.Format_ARGB32_Premultiplied)
+                    image.setDevicePixelRatio(dpr)
+                    image.fill(Qt.transparent)
+                    painter = CountingPainter(image)
+                    painter.setRenderHint(QPainter.Antialiasing)
+                    painter.setClipRect(QRectF(25, 35, 340, 140))
+                    origin = QPointF(31, offset)
+                    if optimized:
+                        view._draw_text_outlines(painter, origin)
+                        self.assertLess(painter.count, len(view.glyph_outlines)//2)
+                    else:
+                        painter.translate(origin)
+                        for outline, color in view.glyph_outlines:
+                            painter.fillPath(outline, color)
+                    painter.end()
+                    results.append(bytes(image.constBits()))
+                self.assertEqual(*results)
+
+    def test_hover_damage_covers_old_and_new_positions(self):
+        from PySide6.QtCore import QRectF
+        self.window.demo()
+        view = self.window.subtitle.view
+        view.focus(0)
+        view.lift = 20.5
+        damage = QRectF(view._hover_damage(1.25))
+        for rect in view.rects[0]:
+            bounds = view.displayed_rect(rect).adjusted(-4, -4, 4, 4)
+            self.assertTrue(damage.contains(bounds.translated(0, -1.25)))
+            self.assertTrue(damage.contains(bounds.translated(0, -20.5)))
         view.focus(None)
 
     def test_subtitle_first_content_uses_window_width(self):
