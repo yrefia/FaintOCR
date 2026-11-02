@@ -55,7 +55,7 @@ Demo 5.5.0 的提示词编辑器属于其入口，5.4.3 仅为对照基线，都
 AnnotatedTextView 保留 QTextLayout 的塑形、换行、UTF-16 索引及标注格式，
 在重新布局时缓存 QRawFont 字形轮廓；静止和悬停均以抗锯齿路径绘制，
 避免原生文字纵向像素对齐导致的小数位移阶梯。轮廓渲染的锐利度可能与原生文字不同。
-动画使用 16ms QTimer + monotonic，默认 140ms、1 逻辑像素、QEasingCurve.OutExpo。
+动画使用 16ms QTimer + monotonic，默认 128ms、1 逻辑像素、QEasingCurve.OutCubic。
 文字和标注使用同一 lift。字体、内容、宽度或图层变化时重新布局并更新轮廓缓存。
 
 ### 动画配置与绘制范围
@@ -66,8 +66,8 @@ from PySide6.QtCore import QEasingCurve
 
 view.set_hover_animation(HoverAnimationConfig(
     height_px=1.0,
-    duration_ms=140,
-    easing=QEasingCurve.Type.OutExpo,
+    duration_ms=128,
+    easing=QEasingCurve.Type.OutCubic,
 ))
 ```
 

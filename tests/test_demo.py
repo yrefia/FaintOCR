@@ -159,7 +159,7 @@ class DemoTests(unittest.TestCase):
         view.set_font_size(20)
         self.assertIsNot(view.glyph_outlines, cached)
 
-    def test_outline_formats_and_out_expo_animation(self):
+    def test_outline_formats_and_out_cubic_animation(self):
         from PySide6.QtGui import QColor
         from ia_learning_core.view import PALETTE
         self.window.demo()
@@ -167,10 +167,10 @@ class DemoTests(unittest.TestCase):
         self.assertTrue(any(color == QColor(*PALETTE['word']) for _, color in view.glyph_outlines))
         view.focus(0)
         view.started = 100
-        with patch('ia_learning_core.view.time.monotonic', return_value=100.07):
+        with patch('ia_learning_core.view.time.monotonic', return_value=100.064):
             view.animate()
         self.assertAlmostEqual(view.lift, view.lift_curve.valueForProgress(.5))
-        self.assertGreater(view.lift, .96)
+        self.assertAlmostEqual(view.lift, .875)
         view.focus(None)
 
     def test_hover_configuration_is_validated_and_snapshotted(self):

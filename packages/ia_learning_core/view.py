@@ -22,8 +22,8 @@ def rgba(value, alpha=255):
 class HoverAnimationConfig:
     """Effect parameters; changes apply at the next hover, never halfway through one."""
     height_px: float = 1.0
-    duration_ms: float = 140.0
-    easing: QEasingCurve.Type = QEasingCurve.Type.OutExpo
+    duration_ms: float = 128.0
+    easing: QEasingCurve.Type = QEasingCurve.Type.OutCubic
 
     def __post_init__(self):
         for value in (self.height_px, self.duration_ms):
