@@ -139,6 +139,40 @@ class DemoTests(unittest.TestCase):
         self.assertEqual(view.lift, 0)
         self.assertIsNone(view.hovered)
 
+    def test_outline_text_changes_at_fractional_vertical_positions(self):
+        from PySide6.QtCore import QPointF, Qt
+        from PySide6.QtGui import QImage, QPainter
+        view = self.window.subtitle.view
+        view.set_content('be', [])
+        images = []
+        cached = view.glyph_outlines
+        for shift in (0, .2, .4, .6, .8, 1):
+            image = QImage(1100, 100, QImage.Format_ARGB32_Premultiplied)
+            image.fill(Qt.transparent)
+            painter = QPainter(image)
+            painter.setRenderHint(QPainter.Antialiasing)
+            view._draw_text_outlines(painter, QPointF(0, 30-shift))
+            painter.end()
+            images.append(bytes(image.constBits()))
+        self.assertEqual(len(set(images)), 6)
+        self.assertIs(view.glyph_outlines, cached)
+        view.set_font_size(20)
+        self.assertIsNot(view.glyph_outlines, cached)
+
+    def test_outline_formats_and_out_expo_animation(self):
+        from PySide6.QtGui import QColor
+        from ia_learning_core.view import PALETTE
+        self.window.demo()
+        view = self.window.subtitle.view
+        self.assertTrue(any(color == QColor(*PALETTE['word']) for _, color in view.glyph_outlines))
+        view.focus(0)
+        view.started = 100
+        with patch('ia_learning_core.view.time.monotonic', return_value=100.07):
+            view.animate()
+        self.assertAlmostEqual(view.lift, view.lift_curve.valueForProgress(.5))
+        self.assertGreater(view.lift, .96)
+        view.focus(None)
+
     def test_subtitle_first_content_uses_window_width(self):
         subtitle = self.module['SubtitleWindow']()
         self.addCleanup(subtitle.close)

@@ -1,6 +1,6 @@
 """Embeddable Qt annotation view. No API calls, prompts or application window policy."""
 import time
-from PySide6.QtCore import Qt, QRectF, QPointF, QTimer, Signal
+from PySide6.QtCore import Qt, QRectF, QPointF, QTimer, Signal, QEasingCurve
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QTextLayout, QTextOption, QTextCharFormat, QPainterPath
 from PySide6.QtWidgets import QWidget
 
@@ -36,6 +36,7 @@ class AnnotatedTextView(QWidget):
         self.rects = []
         self.content_height = 0
         self._blank_pressed = False
+        self.lift_curve = QEasingCurve(QEasingCurve.OutExpo)
         self.timer = QTimer(self)
         self.timer.setInterval(16)
         self.timer.timeout.connect(self.animate)
@@ -108,6 +109,7 @@ class AnnotatedTextView(QWidget):
             line.setPosition(QPointF(0, y))
             y += line.height()
         self.text_layout.endLayout()
+        self._cache_glyph_outlines()
         self.content_height = y
         self.scroll = min(self.scroll, max(0, y-self.text_area().height()))
         self.rects = [[] for _ in self.items]
@@ -121,6 +123,30 @@ class AnnotatedTextView(QWidget):
                     if a < b:
                         x1, x2 = line.cursorToX(a)[0], line.cursorToX(b)[0]
                         self.rects[number].append(QRectF(self.MARGIN_X+x1, line.y(), max(1,x2-x1), line.height()))
+
+
+    def _cache_glyph_outlines(self):
+        """Keep Qt shaping/UTF-16 positions and format colors; rebuild only on layout changes."""
+        self.glyph_outlines = []
+        formats = self.text_layout.formats()
+        for run in self.text_layout.glyphRuns(0, -1, QTextLayout.GlyphRunRetrievalFlag.RetrieveAll):
+            font = run.rawFont()
+            for glyph, position, index in zip(run.glyphIndexes(), run.positions(), run.stringIndexes()):
+                color = QColor(*PALETTE['original'])
+                for part in formats:
+                    if part.start <= index < part.start + part.length:
+                        color = part.format.foreground().color()
+                outline = font.pathForGlyph(glyph).translated(position)
+                self.glyph_outlines.append((outline, color))
+
+    def _draw_text_outlines(self, painter, origin):
+        # Vector coverage changes at fractional Y positions; native glyph drawing
+        # can snap vertically even when the painter translation is fractional.
+        painter.save()
+        painter.translate(origin)
+        for outline, color in self.glyph_outlines:
+            painter.fillPath(outline, color)
+        painter.restore()
 
 
     def text_top(self):
@@ -163,13 +189,13 @@ class AnnotatedTextView(QWidget):
             p.setPen(QColor(*PALETTE['original']))
             p.save()
             p.setClipPath(all_text.subtracted(target), Qt.IntersectClip)
-            self.text_layout.draw(p, QPointF(self.MARGIN_X, self.text_top()-self.scroll))
+            self._draw_text_outlines(p, QPointF(self.MARGIN_X, self.text_top()-self.scroll))
             p.restore()
             if not target.isEmpty():
                 p.save()
                 p.translate(0, -self.lift)
                 p.setClipPath(target, Qt.IntersectClip)
-                self.text_layout.draw(p, QPointF(self.MARGIN_X, self.text_top()-self.scroll))
+                self._draw_text_outlines(p, QPointF(self.MARGIN_X, self.text_top()-self.scroll))
                 p.restore()
         p.end()
 
@@ -199,7 +225,7 @@ class AnnotatedTextView(QWidget):
 
     def animate(self):
         progress = min(1, (time.monotonic()-self.started)/.14)
-        self.lift = 1-(1-progress)**3
+        self.lift = self.lift_curve.valueForProgress(progress)
         if progress >= 1:
             self.timer.stop()
         self.update()
